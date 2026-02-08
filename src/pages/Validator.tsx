@@ -3,36 +3,13 @@ import { useEffect, useState } from "react";
 import { ShieldCheck, ArrowLeft, RefreshCw, Copy, Check } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { ThemeSwitcher } from "@/components/ThemeSwitcher";
 import { Navigation } from "@/components/Navigation";
 import { ValidatorCard } from "@/components/ValidatorCard";
 import { x1Client } from "@/lib/x1-rpc";
-import { getValidatorByVotePubkey } from "@/lib/validators-db";
+import { api } from "@/lib/api";
 import { toast } from "sonner";
 import { ChartSettingsProvider } from "@/hooks/useChartSettings";
 import { EpochReward } from "@/components/ValidatorDashboard";
-
-const getEpochTimestampCache = (): Map<number, string> => {
-  try {
-    const cache = localStorage.getItem('epochTimestampCache');
-    if (cache) {
-      const parsed = JSON.parse(cache);
-      return new Map(Object.entries(parsed).map(([k, v]) => [Number(k), v as string]));
-    }
-  } catch (error) {
-    console.error('Error loading epoch timestamp cache:', error);
-  }
-  return new Map();
-};
-
-const saveEpochTimestampCache = (cache: Map<number, string>) => {
-  try {
-    const obj = Object.fromEntries(cache);
-    localStorage.setItem('epochTimestampCache', JSON.stringify(obj));
-  } catch (error) {
-    console.error('Error saving epoch timestamp cache:', error);
-  }
-};
 
 interface ValidatorData {
   voteAddress: string;
@@ -60,7 +37,7 @@ const Validator = () => {
 
   const fetchValidator = async (isRefresh = false) => {
     if (!address) return;
-    
+
     if (isRefresh) {
       setRefreshing(true);
     } else {
@@ -68,190 +45,40 @@ const Validator = () => {
     }
 
     try {
-      const epochInfo = await x1Client.getEpochInfo();
-      const currentEpoch = epochInfo.epoch;
-      const voteAccounts = await x1Client.getVoteAccounts();
-      
-      const activeValidator = voteAccounts.current?.find((v: any) => v.votePubkey === address);
-      const delinquentValidator = voteAccounts.delinquent?.find((v: any) => v.votePubkey === address);
-      
-      const validatorInfo = activeValidator || delinquentValidator;
-      const status = activeValidator ? 'active' : delinquentValidator ? 'delinquent' : 'unknown';
-      const activatedStake = validatorInfo?.activatedStake ? validatorInfo.activatedStake / 1e9 : 0;
-
-      // Fetch validator name and avatar
-      let validatorName: string | undefined;
-      let validatorAvatar: string | undefined;
-      try {
-        const cachedValidatorMeta = await getValidatorByVotePubkey(address);
-        if (cachedValidatorMeta) {
-          validatorName = cachedValidatorMeta.name;
-          validatorAvatar = cachedValidatorMeta.iconUrl;
-        }
-        
-        const response = await fetch(`https://api.xen.network/v1/x1/validators?network=mainnet&votePubkey=${address}`);
-        if (response.ok) {
-          const data = await response.json();
-          validatorName = validatorName || data[0]?.name || undefined;
-          validatorAvatar = validatorAvatar || data[0]?.iconUrl || undefined;
-        }
-      } catch (error) {
-        console.log("Could not fetch validator metadata");
+      // Get validator data from API (or add if not in DB)
+      let data = await api.getValidator(address);
+      if (!data) {
+        data = await api.addValidator(address);
       }
 
-      // Get self-stake info
-      let selfStakeAmount = 0;
-      if (validatorInfo?.nodePubkey) {
-        try {
-          const selfStakeAddresses = await x1Client.getStakeAccountsForVote(address, validatorInfo.nodePubkey);
-          if (selfStakeAddresses.length > 0) {
-            const accountsInfo = await x1Client.getMultipleAccounts(selfStakeAddresses);
-            selfStakeAmount = accountsInfo.value
-              .filter((acc: any) => acc !== null)
-              .reduce((sum: number, acc: any) => sum + (acc.lamports || 0), 0) / 1e9;
-          }
-        } catch (error) {
-          console.error("Failed to fetch self-stake:", error);
-        }
+      if (!data) {
+        toast.error("Validator not found");
+        setLoading(false);
+        setRefreshing(false);
+        return;
       }
 
-      // Fetch epoch rewards
-      const epochsToFetch = 100;
-      const epochNumbers = Array.from({ length: epochsToFetch }, (_, i) => currentEpoch - i).filter(e => e >= 0);
-      
-      const epochTimestampCache = getEpochTimestampCache();
-      const epochsMeta = await fetch("https://api.xen.network/v1/x1/epochs").then(res => res.json());
-      const epochSlotMap = new Map(epochsMeta.map((e: any) => [e.epoch, e.endSlot]));
-
-      let stakeHistoryMap = new Map<number, number>();
-      if (validatorInfo?.nodePubkey) {
-        try {
-          const historyResponse = await fetch(`https://api.xen.network/v1/x1/validators/${validatorInfo.nodePubkey}/history?groupBy=epoch&network=mainnet`);
-          if (historyResponse.ok) {
-            const historyData = await historyResponse.json();
-            historyData.forEach((item: any) => {
-              if (item.epoch !== undefined && item.activatedStake !== undefined) {
-                stakeHistoryMap.set(item.epoch, item.activatedStake / 1e9);
-              }
-            });
-          }
-        } catch (error) {
-          console.error("Failed to fetch stake history:", error);
-        }
-      }
-
-      // Get self-stake addresses for rewards
-      let selfStakeAddresses: string[] = [];
-      if (validatorInfo?.nodePubkey) {
-        selfStakeAddresses = await x1Client.getStakeAccountsForVote(address, validatorInfo.nodePubkey);
-      }
-
-      const batchRequests = epochNumbers.map(epoch => ({
-        method: "getInflationReward",
-        params: [[address], { epoch }],
-      }));
-
-      let selfStakeBatchRequests: any[] = [];
-      if (selfStakeAddresses.length > 0) {
-        selfStakeBatchRequests = epochNumbers.map(epoch => ({
-          method: "getInflationReward",
-          params: [selfStakeAddresses, { epoch }],
-        }));
-      }
-
-      const epochsNeedingTimestamp = epochNumbers.filter(epoch => 
-        !epochTimestampCache.has(epoch) && epochSlotMap.has(epoch)
-      );
-
-      const timeRequests = epochsNeedingTimestamp.map(epoch => ({
-        method: "getBlockTime",
-        params: [epochSlotMap.get(epoch)],
-      }));
-
-      const allRequests = [...batchRequests, ...selfStakeBatchRequests, ...timeRequests];
-      const batchResults = await x1Client.batchCall(allRequests);
-
-      const validatorResults = batchResults.slice(0, epochNumbers.length);
-      const selfStakeResults = batchResults.slice(epochNumbers.length, 2 * epochNumbers.length);
-      const timeResults = batchResults.slice(2 * epochNumbers.length);
-
-      const epochTimeMap = new Map(epochTimestampCache);
-      for (let i = 0; i < timeResults.length; i++) {
-        const epoch = epochsNeedingTimestamp[i];
-        const timestamp = timeResults[i];
-        if (timestamp) {
-          const d = new Date(timestamp * 1000);
-          const datePart = d.toLocaleDateString('en-US', {
-            day: '2-digit',
-            month: 'short',
-            year: 'numeric'
-          });
-          const hours = String(d.getHours()).padStart(2, "0");
-          const minutes = String(d.getMinutes()).padStart(2, "0");
-          epochTimeMap.set(epoch, `${datePart} ${hours}:${minutes}`);
-        }
-      }
-      saveEpochTimestampCache(epochTimeMap);
-
-      const epochRewards: EpochReward[] = [];
-      for (let i = 0; i < epochNumbers.length; i++) {
-        const epoch = epochNumbers[i];
-        const result = validatorResults[i];
-
-        if (result?.[0]?.amount) {
-          let selfStakeReward = 0;
-          if (Array.isArray(selfStakeResults[i])) {
-            selfStakeReward = selfStakeResults[i]
-              .filter((r: any) => r && r.amount)
-              .reduce((sum: number, r: any) => sum + r.amount / 1e9, 0);
-          }
-
-          const voteReward = result[0].amount / 1e9;
-          epochRewards.push({
-            epoch,
-            voteReward,
-            reward: voteReward + selfStakeReward,
-            commission: result[0].commission || 10,
-            selfStakeReward,
-            date: epochTimeMap.get(epoch) || undefined,
-            activeStake: stakeHistoryMap.get(epoch) || 0,
-            postBalance: result[0].postBalance ? result[0].postBalance / 1e9 : undefined,
-          });
-        }
-      }
-
-      epochRewards.sort((a, b) => b.epoch - a.epoch);
-
-      // Fetch block production
+      // Fetch live block production from RPC
       let blocksProduced = 0;
       let skippedSlots = 0;
-      if (validatorInfo?.nodePubkey) {
-        try {
-          const blockProduction = await x1Client.getBlockProduction(currentEpoch);
-          const validatorBlockData = blockProduction?.value?.byIdentity?.[validatorInfo.nodePubkey];
+      try {
+        const epochInfo = await x1Client.getEpochInfo();
+        const voteAccounts = await x1Client.getVoteAccounts();
+        const allAccounts = [...voteAccounts.current, ...voteAccounts.delinquent];
+        const account = allAccounts.find((acc: any) => acc.votePubkey === address);
+
+        if (account?.nodePubkey) {
+          const blockProduction = await x1Client.getBlockProduction(epochInfo.epoch);
+          const validatorBlockData = blockProduction?.value?.byIdentity?.[account.nodePubkey];
           blocksProduced = validatorBlockData ? validatorBlockData[0] : 0;
           skippedSlots = validatorBlockData ? blocksProduced - validatorBlockData[1] : 0;
-        } catch (error) {
-          console.error("Failed to fetch block production:", error);
         }
+      } catch (error) {
+        console.error("Failed to fetch block production:", error);
       }
 
-      const totalRewards = epochRewards.reduce((sum, r) => sum + r.reward, 0);
-      const averageReward = epochRewards.length > 0 ? totalRewards / epochRewards.length : 0;
-
       setValidator({
-        voteAddress: address,
-        totalRewards,
-        epochCount: epochRewards.length,
-        averageReward,
-        currentEpoch,
-        activatedStake,
-        commission: validatorInfo?.commission || 10,
-        epochRewards,
-        status,
-        name: validatorName,
-        avatar: validatorAvatar,
-        selfStakeAmount,
+        ...data,
         blocksProduced,
         skippedSlots,
       });

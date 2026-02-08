@@ -1,0 +1,54 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: x1_epoch_viewer
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    restart: always
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  server:
+    build: .
+    environment:
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/x1_epoch_viewer
+      PORT: "3001"
+      CORS_ORIGIN: https://${DOMAIN}
+      X1_RPC_URL: ${X1_RPC_URL:-https://rpc.mainnet.x1.xyz}
+      NODE_ENV: production
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: always
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/templates/default.conf.template:ro
+      - frontend-dist:/usr/share/nginx/html:ro
+    environment:
+      DOMAIN: ${DOMAIN}
+    depends_on:
+      - server
+    restart: always
+
+  # Copy frontend dist from server image to shared volume
+  frontend-init:
+    build: .
+    command: sh -c "cp -r /app/frontend-dist/* /frontend-dist/"
+    volumes:
+      - frontend-dist:/frontend-dist
+
+volumes:
+  pgdata:
+  frontend-dist:

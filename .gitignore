@@ -12,6 +12,11 @@ dist
 dist-ssr
 *.local
 
+# Environment files (secrets)
+.env
+server/.env
+certbot-conf/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
