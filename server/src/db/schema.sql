@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS validators (
   self_stake_addresses TEXT[],
   self_stake_amount DOUBLE PRECISION DEFAULT 0,
   node_pubkey VARCHAR(64),
+  is_tracked BOOLEAN NOT NULL DEFAULT true,
   updated_at TIMESTAMP DEFAULT NOW()
 );
 

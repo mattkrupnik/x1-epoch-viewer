@@ -1,5 +1,7 @@
 import pool from '../db/connection.js';
 import { x1Client } from '../lib/x1-rpc.js';
+import { fetchEpochSlotMap, fetchStakeHistoryForEpoch } from '../lib/xen-api.js';
+import { formatEpochTimestamp, calculateSelfStakeReward } from '../lib/epoch-helpers.js';
 
 const FALLBACK_INTERVAL_MS = 5 * 60_000; // 5 min fallback if calculation fails
 const POLLING_THRESHOLD_MS = 5 * 60_000; // Start fast polling within 5 min of epoch end
@@ -28,14 +30,14 @@ async function setLastProcessedEpoch(epoch: number): Promise<void> {
 }
 
 async function updateValidatorsForNewEpoch(newEpoch: number, currentEpoch: number): Promise<void> {
-  // Get all validators from DB
+  // Get all tracked validators from DB
   const validatorsResult = await pool.query(
-    'SELECT vote_address, self_stake_addresses, node_pubkey FROM validators'
+    'SELECT vote_address, self_stake_addresses, node_pubkey FROM validators WHERE is_tracked = true'
   );
 
   const validators = validatorsResult.rows;
   if (validators.length === 0) {
-    console.log('[epoch-monitor] No validators in DB, nothing to update');
+    console.log('[epoch-monitor] No tracked validators in DB, nothing to update');
     return;
   }
 
@@ -53,13 +55,8 @@ async function updateValidatorsForNewEpoch(newEpoch: number, currentEpoch: numbe
 
   // Fetch epoch metadata for timestamp
   let epochEndSlot: number | undefined;
-  try {
-    const epochsMeta = await fetch('https://api.xen.network/v1/x1/epochs').then(r => r.json()) as any[];
-    const epochMeta = epochsMeta.find((e: any) => e.epoch === newEpoch);
-    if (epochMeta) epochEndSlot = epochMeta.endSlot;
-  } catch {
-    // Will try to get timestamp later
-  }
+  const epochSlotMap = await fetchEpochSlotMap();
+  epochEndSlot = epochSlotMap.get(newEpoch);
 
   // Fetch timestamp for the new epoch
   let epochTimestamp: string | undefined;
@@ -67,15 +64,7 @@ async function updateValidatorsForNewEpoch(newEpoch: number, currentEpoch: numbe
     try {
       const blockTime = await x1Client.getBlockTime(epochEndSlot);
       if (blockTime) {
-        const d = new Date(blockTime * 1000);
-        const datePart = d.toLocaleDateString('en-US', {
-          day: '2-digit',
-          month: 'short',
-          year: 'numeric',
-        });
-        const hours = String(d.getHours()).padStart(2, '0');
-        const minutes = String(d.getMinutes()).padStart(2, '0');
-        epochTimestamp = `${datePart} ${hours}:${minutes}`;
+        epochTimestamp = formatEpochTimestamp(blockTime);
 
         // Save timestamp to DB
         await pool.query(
@@ -148,21 +137,14 @@ async function updateValidatorsForNewEpoch(newEpoch: number, currentEpoch: numbe
   const executing: Promise<void>[] = [];
   for (const v of validatorsWithPubkey) {
     const p = (async () => {
-      try {
-        const historyResponse = await fetch(
-          `https://api.xen.network/v1/x1/validators/${v.node_pubkey}/history?groupBy=epoch&network=mainnet`
-        );
-        if (historyResponse.ok) {
-          const historyData = await historyResponse.json() as any[];
-          const epochData = historyData.find((item: any) => item.epoch === newEpoch);
-          if (epochData?.activatedStake !== undefined) {
-            stakeHistoryMap.set(v.vote_address, epochData.activatedStake / 1e9);
-          }
-        }
-      } catch {
-        // Silently ignore per-validator errors
+      const stake = await fetchStakeHistoryForEpoch(v.node_pubkey, newEpoch);
+      if (stake !== undefined) {
+        stakeHistoryMap.set(v.vote_address, stake);
       }
-    })().then(() => { executing.splice(executing.indexOf(p), 1); });
+    })().then(() => {
+      const idx = executing.indexOf(p);
+      if (idx !== -1) executing.splice(idx, 1);
+    });
     executing.push(p);
     if (executing.length >= STAKE_HISTORY_CONCURRENCY) {
       await Promise.race(executing);
@@ -205,15 +187,10 @@ async function updateValidatorsForNewEpoch(newEpoch: number, currentEpoch: numbe
       if (voteResult?.[0]?.amount) {
         let selfStakeReward = 0;
 
-        // Check if this validator had self-stake requests
         if (v.self_stake_addresses && v.self_stake_addresses.length > 0) {
           const ssResult = selfStakeResults[selfStakeIndex];
           selfStakeIndex++;
-          if (Array.isArray(ssResult)) {
-            selfStakeReward = ssResult
-              .filter((r: any) => r && r.amount)
-              .reduce((sum: number, r: any) => sum + r.amount / 1e9, 0);
-          }
+          selfStakeReward = calculateSelfStakeReward(ssResult);
         }
 
         const voteReward = voteResult[0].amount / 1e9;
@@ -289,7 +266,9 @@ async function getTimeUntilNextEpoch(): Promise<number> {
   const epochInfo = await x1Client.getEpochInfo();
   const perfSamples = await x1Client.getRecentPerformanceSamples(1);
   const sample = perfSamples[0];
-  const slotTimeSec = sample?.samplePeriodSecs / sample?.numSlots || 0.4;
+  const slotTimeSec = (sample?.samplePeriodSecs && sample?.numSlots)
+    ? sample.samplePeriodSecs / sample.numSlots
+    : 0.4;
 
   const slotsRemaining = epochInfo.slotsInEpoch - epochInfo.slotIndex;
   const msRemaining = slotsRemaining * slotTimeSec * 1000;
@@ -308,15 +287,12 @@ async function scheduleNextCheck(): Promise<void> {
     const msUntilEpochEnd = await getTimeUntilNextEpoch();
 
     if (msUntilEpochEnd <= POLLING_THRESHOLD_MS) {
-      // Within 5 minutes: poll every 30 seconds
       nextCheckMs = POLLING_INTERVAL_MS;
       console.log(`[epoch-monitor] Near epoch boundary, polling every ${POLLING_INTERVAL_MS / 1000}s`);
     } else if (msUntilEpochEnd <= FAR_POLLING_THRESHOLD_MS) {
-      // Within 10 minutes: poll every 2 minutes
       nextCheckMs = FAR_POLLING_INTERVAL_MS;
       console.log(`[epoch-monitor] Approaching epoch boundary, polling every ${FAR_POLLING_INTERVAL_MS / 1000}s`);
     } else {
-      // Far from epoch end: wake up when we enter the 10-minute window
       nextCheckMs = msUntilEpochEnd - FAR_POLLING_THRESHOLD_MS;
     }
   } catch (error) {

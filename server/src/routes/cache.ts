@@ -12,7 +12,7 @@ router.get('/epochs-metadata', async (req, res) => {
 
     const data: Record<number, number> = {};
     for (const row of result.rows) {
-      data[row.epoch] = parseInt(row.end_slot);
+      data[row.epoch] = parseInt(row.end_slot, 10);
     }
 
     res.json(data);

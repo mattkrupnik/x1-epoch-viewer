@@ -27,4 +27,3 @@ certbot-conf/
 *.njsproj
 *.sln
 *.sw?
-server/.env

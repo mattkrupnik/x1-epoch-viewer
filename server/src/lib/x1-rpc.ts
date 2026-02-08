@@ -1,5 +1,7 @@
 // X1 Network RPC client for Node.js server
 const RPC_URL = process.env.X1_RPC_URL || 'https://rpc.mainnet.x1.xyz';
+const SINGLE_CALL_TIMEOUT_MS = 15_000;
+const BATCH_CALL_TIMEOUT_MS = 30_000;
 
 export interface EpochInfo {
   epoch: number;
@@ -16,24 +18,32 @@ export class X1RpcClient {
   }
 
   async call(method: string, params: any[] = []): Promise<any> {
-    const response = await fetch(this.rpcUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        id: 1,
-        method,
-        params,
-      }),
-    });
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), SINGLE_CALL_TIMEOUT_MS);
 
-    const data = await response.json() as any;
+    try {
+      const response = await fetch(this.rpcUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 1,
+          method,
+          params,
+        }),
+        signal: controller.signal,
+      });
 
-    if (data.error) {
-      throw new Error(`RPC error (${method}): ${data.error.message}`);
+      const data = await response.json() as any;
+
+      if (data.error) {
+        throw new Error(`RPC error (${method}): ${data.error.message}`);
+      }
+
+      return data.result;
+    } finally {
+      clearTimeout(timeoutId);
     }
-
-    return data.result;
   }
 
   async batchCall(requests: Array<{ method: string; params: any[] }>): Promise<any[]> {
@@ -57,27 +67,35 @@ export class X1RpcClient {
       params: req.params,
     }));
 
-    const response = await fetch(this.rpcUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), BATCH_CALL_TIMEOUT_MS);
 
-    if (!response.ok) {
-      throw new Error(`HTTP error: ${response.status} ${response.statusText}`);
-    }
-
-    const data = await response.json() as any;
-
-    if (Array.isArray(data)) {
-      const sorted = data.sort((a: any, b: any) => a.id - b.id);
-      return sorted.map((item: any) => {
-        if (item.error) return null;
-        return item.result;
+    try {
+      const response = await fetch(this.rpcUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        signal: controller.signal,
       });
-    }
 
-    throw new Error('Invalid batch response format');
+      if (!response.ok) {
+        throw new Error(`HTTP error: ${response.status} ${response.statusText}`);
+      }
+
+      const data = await response.json() as any;
+
+      if (Array.isArray(data)) {
+        const sorted = data.sort((a: any, b: any) => a.id - b.id);
+        return sorted.map((item: any) => {
+          if (item.error) return null;
+          return item.result;
+        });
+      }
+
+      throw new Error('Invalid batch response format');
+    } finally {
+      clearTimeout(timeoutId);
+    }
   }
 
   async getEpochInfo(): Promise<EpochInfo> {

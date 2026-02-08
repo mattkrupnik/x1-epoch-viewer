@@ -1,43 +1,28 @@
 import { Router } from 'express';
 import pool from '../db/connection.js';
 import { x1Client } from '../lib/x1-rpc.js';
+import { fetchEpochSlotMap, fetchStakeHistory, fetchValidatorMetadata } from '../lib/xen-api.js';
+import {
+  buildInflationRewardRequests,
+  buildBlockTimeRequests,
+  processTimestampResults,
+  processEpochRewards,
+  processEpochRewardsForResponse,
+} from '../lib/epoch-helpers.js';
+import {
+  getExistingTimestamps,
+  getAllTimestamps,
+  saveTimestampsBatch,
+  saveEpochRewardsBatch,
+} from '../lib/db-helpers.js';
+import type { ValidatorData, EpochReward } from '../lib/types.js';
 
 const router = Router();
-
-// Shared interface matching frontend ValidatorData
-interface ValidatorData {
-  voteAddress: string;
-  totalRewards: number;
-  epochCount: number;
-  averageReward: number;
-  currentEpoch: number;
-  activatedStake: number;
-  commission: number;
-  epochRewards: EpochReward[];
-  status: string;
-  name?: string;
-  avatar?: string;
-  selfStakeAddresses?: string[];
-  selfStakeAmount?: number;
-  nodePubkey?: string;
-}
-
-interface EpochReward {
-  epoch: number;
-  voteReward: number;
-  reward: number;
-  commission: number;
-  selfStakeReward?: number;
-  date?: string;
-  activeStake?: number;
-  postBalance?: number;
-}
 
 // Sync missing epochs for a validator when page is visited
 async function syncMissingEpochs(v: any, currentRpcEpoch: number): Promise<void> {
   const latestRewardEpoch = currentRpcEpoch - 1;
 
-  // Find which epochs are missing
   const maxEpochResult = await pool.query(
     'SELECT MAX(epoch) as max_epoch FROM epoch_rewards WHERE vote_address = $1',
     [v.vote_address]
@@ -50,48 +35,26 @@ async function syncMissingEpochs(v: any, currentRpcEpoch: number): Promise<void>
   for (let e = maxEpochInDB + 1; e <= latestRewardEpoch; e++) {
     missingEpochs.push(e);
   }
-
   if (missingEpochs.length === 0) return;
 
   console.log(`[sync-on-visit] ${v.vote_address}: syncing ${missingEpochs.length} missing epoch(s) (${missingEpochs[0]}–${missingEpochs[missingEpochs.length - 1]})`);
 
-  // Build batch RPC requests for inflation rewards
-  const voteRewardRequests = missingEpochs.map(epoch => ({
-    method: 'getInflationReward',
-    params: [[v.vote_address], { epoch }],
-  }));
-
   const selfStakeAddresses: string[] = v.self_stake_addresses || [];
-  let selfStakeRequests: Array<{ method: string; params: any[] }> = [];
-  if (selfStakeAddresses.length > 0) {
-    selfStakeRequests = missingEpochs.map(epoch => ({
-      method: 'getInflationReward',
-      params: [selfStakeAddresses, { epoch }],
-    }));
-  }
+  const hasSelfStake = selfStakeAddresses.length > 0;
 
-  // Check which epoch timestamps we already have
-  const tsResult = await pool.query(
-    'SELECT epoch, timestamp_str FROM epoch_timestamps WHERE epoch = ANY($1)',
-    [missingEpochs]
-  );
-  const existingTimestamps = new Map<number, string>();
-  tsResult.rows.forEach((r: any) => existingTimestamps.set(r.epoch, r.timestamp_str));
+  // Build RPC requests
+  const voteRewardRequests = buildInflationRewardRequests([v.vote_address], missingEpochs);
+  const selfStakeRequests = hasSelfStake
+    ? buildInflationRewardRequests(selfStakeAddresses, missingEpochs)
+    : [];
 
-  // Get epoch metadata for timestamps we don't have
-  let epochSlotMap = new Map<number, number>();
-  try {
-    const epochsMeta = await fetch('https://api.xen.network/v1/x1/epochs').then(r => r.json()) as any[];
-    epochsMeta.forEach((e: any) => epochSlotMap.set(e.epoch, e.endSlot));
-  } catch { /* ignore */ }
-
+  // Get timestamps
+  const existingTimestamps = await getExistingTimestamps(missingEpochs);
+  const epochSlotMap = await fetchEpochSlotMap();
   const epochsNeedingTimestamp = missingEpochs.filter(
     epoch => !existingTimestamps.has(epoch) && epochSlotMap.has(epoch)
   );
-  const timeRequests = epochsNeedingTimestamp.map(epoch => ({
-    method: 'getBlockTime',
-    params: [epochSlotMap.get(epoch)],
-  }));
+  const timeRequests = buildBlockTimeRequests(epochsNeedingTimestamp, epochSlotMap);
 
   // Execute all RPC requests in one batch
   const allRequests = [...voteRewardRequests, ...selfStakeRequests, ...timeRequests];
@@ -102,92 +65,36 @@ async function syncMissingEpochs(v: any, currentRpcEpoch: number): Promise<void>
   const timeResults = batchResults.slice(missingEpochs.length + selfStakeRequests.length);
 
   // Process timestamps
-  const epochTimeMap = new Map(existingTimestamps);
-  const newTimestamps: Array<{ epoch: number; timestampStr: string }> = [];
-  for (let i = 0; i < timeResults.length; i++) {
-    const epoch = epochsNeedingTimestamp[i];
-    const timestamp = timeResults[i];
-    if (timestamp) {
-      const d = new Date(timestamp * 1000);
-      const datePart = d.toLocaleDateString('en-US', { day: '2-digit', month: 'short', year: 'numeric' });
-      const hours = String(d.getHours()).padStart(2, '0');
-      const minutes = String(d.getMinutes()).padStart(2, '0');
-      const timestampStr = `${datePart} ${hours}:${minutes}`;
-      epochTimeMap.set(epoch, timestampStr);
-      newTimestamps.push({ epoch, timestampStr });
-    }
-  }
+  const { epochTimeMap, newTimestamps } = processTimestampResults(
+    timeResults, epochsNeedingTimestamp, existingTimestamps
+  );
 
   // Fetch stake history
-  const stakeHistoryMap = new Map<number, number>();
-  if (v.node_pubkey) {
-    try {
-      const historyResponse = await fetch(
-        `https://api.xen.network/v1/x1/validators/${v.node_pubkey}/history?groupBy=epoch&network=mainnet`
-      );
-      if (historyResponse.ok) {
-        const historyData = await historyResponse.json() as any[];
-        historyData.forEach((item: any) => {
-          if (item.epoch !== undefined && item.activatedStake !== undefined) {
-            stakeHistoryMap.set(item.epoch, item.activatedStake / 1e9);
-          }
-        });
-      }
-    } catch { /* ignore */ }
-  }
+  const stakeHistoryMap = v.node_pubkey
+    ? await fetchStakeHistory(v.node_pubkey)
+    : new Map<number, number>();
+
+  // Process rewards
+  const rewardRows = processEpochRewards(
+    voteRewardResults, selfStakeResults, missingEpochs,
+    epochTimeMap, stakeHistoryMap, hasSelfStake
+  );
 
   // Save to DB in a transaction
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
 
-    // Save new timestamps
-    for (const { epoch, timestampStr } of newTimestamps) {
-      await client.query(
-        'INSERT INTO epoch_timestamps (epoch, timestamp_str) VALUES ($1, $2) ON CONFLICT (epoch) DO NOTHING',
-        [epoch, timestampStr]
-      );
-    }
+    await saveTimestampsBatch(client, newTimestamps);
+    await saveEpochRewardsBatch(client, v.vote_address, rewardRows);
 
-    // Save epoch rewards
-    let savedCount = 0;
-    for (let i = 0; i < missingEpochs.length; i++) {
-      const epoch = missingEpochs[i];
-      const result = voteRewardResults[i];
-
-      if (result?.[0]?.amount) {
-        let selfStakeReward = 0;
-        if (selfStakeAddresses.length > 0 && Array.isArray(selfStakeResults[i])) {
-          selfStakeReward = selfStakeResults[i]
-            .filter((r: any) => r && r.amount)
-            .reduce((sum: number, r: any) => sum + r.amount / 1e9, 0);
-        }
-
-        const voteReward = result[0].amount / 1e9;
-        await client.query(
-          `INSERT INTO epoch_rewards (vote_address, epoch, vote_reward, reward, commission, self_stake_reward, date, active_stake, post_balance)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-           ON CONFLICT (vote_address, epoch) DO NOTHING`,
-          [
-            v.vote_address, epoch, voteReward, voteReward + selfStakeReward,
-            result[0].commission || 10, selfStakeReward,
-            epochTimeMap.get(epoch) || null,
-            stakeHistoryMap.get(epoch) || 0,
-            result[0].postBalance ? result[0].postBalance / 1e9 : null,
-          ]
-        );
-        savedCount++;
-      }
-    }
-
-    // Update validator's current_epoch
     await client.query(
       'UPDATE validators SET current_epoch = $1, updated_at = NOW() WHERE vote_address = $2',
       [currentRpcEpoch, v.vote_address]
     );
 
     await client.query('COMMIT');
-    console.log(`[sync-on-visit] ${v.vote_address}: saved ${savedCount} epoch rewards`);
+    console.log(`[sync-on-visit] ${v.vote_address}: saved ${rewardRows.length} epoch rewards`);
   } catch (error) {
     await client.query('ROLLBACK');
     console.error('[sync-on-visit] Failed to save:', error);
@@ -201,7 +108,7 @@ async function syncMissingEpochs(v: any, currentRpcEpoch: number): Promise<void>
 router.get('/search', async (req, res) => {
   try {
     const q = (req.query.q as string || '').trim();
-    if (q.length < 2) {
+    if (q.length < 2 || q.length > 100) {
       return res.json([]);
     }
 
@@ -231,7 +138,7 @@ router.get('/:voteAddress', async (req, res) => {
     const { voteAddress } = req.params;
 
     const validatorResult = await pool.query(
-      'SELECT * FROM validators WHERE vote_address = $1',
+      'SELECT * FROM validators WHERE vote_address = $1 AND is_tracked = true',
       [voteAddress]
     );
 
@@ -246,11 +153,10 @@ router.get('/:voteAddress', async (req, res) => {
     try {
       const epochInfo = await x1Client.getEpochInfo();
       rpcEpoch = epochInfo.epoch;
-      const latestRewardEpoch = epochInfo.epoch - 1;
 
       const latestCheck = await pool.query(
         'SELECT 1 FROM epoch_rewards WHERE vote_address = $1 AND epoch = $2',
-        [voteAddress, latestRewardEpoch]
+        [voteAddress, epochInfo.epoch - 1]
       );
 
       if (latestCheck.rows.length === 0) {
@@ -336,14 +242,30 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ error: 'voteAddress is required' });
     }
 
-    // Check if already in DB
+    // Check if already in DB (including soft-deleted)
     const existing = await pool.query(
-      'SELECT vote_address FROM validators WHERE vote_address = $1',
+      'SELECT vote_address, is_tracked FROM validators WHERE vote_address = $1',
       [voteAddress]
     );
 
     if (existing.rows.length > 0) {
-      // Already exists - return existing data via GET logic
+      // Re-activate if soft-deleted
+      if (!existing.rows[0].is_tracked) {
+        await pool.query(
+          'UPDATE validators SET is_tracked = true, updated_at = NOW() WHERE vote_address = $1',
+          [voteAddress]
+        );
+      }
+
+      // Sync missing epochs before returning
+      try {
+        const epochInfo = await x1Client.getEpochInfo();
+        const v = (await pool.query('SELECT * FROM validators WHERE vote_address = $1', [voteAddress])).rows[0];
+        await syncMissingEpochs(v, epochInfo.epoch);
+      } catch (syncErr) {
+        console.warn('[POST validator] Sync failed, returning cached data:', (syncErr as Error).message);
+      }
+
       const getResponse = await buildValidatorResponse(voteAddress);
       if (getResponse) {
         return res.json(getResponse);
@@ -358,9 +280,7 @@ router.post('/', async (req, res) => {
       return res.status(404).json({ error: 'Validator not found on chain' });
     }
 
-    // Save to DB
     await saveValidatorToDB(validatorData);
-
     res.json(validatorData);
   } catch (error) {
     console.error('Error adding validator:', error);
@@ -394,8 +314,8 @@ router.post('/:voteAddress/resync', async (req, res) => {
     const epochInfo = await x1Client.getEpochInfo();
     const currentEpoch = epochInfo.epoch;
 
-    // Find missing epochs (last 400)
-    const allEpochs = Array.from({ length: 400 }, (_, i) => currentEpoch - 1 - i).filter(e => e >= 0);
+    // Find missing epochs (all from beginning)
+    const allEpochs = Array.from({ length: currentEpoch }, (_, i) => currentEpoch - 1 - i).filter(e => e >= 0);
     const missingEpochs = allEpochs.filter(e => !existingSet.has(e));
 
     if (missingEpochs.length === 0) {
@@ -405,129 +325,54 @@ router.post('/:voteAddress/resync', async (req, res) => {
 
     console.log(`[resync] ${voteAddress}: found ${missingEpochs.length} missing epochs, fetching...`);
 
-    // Fetch rewards for missing epochs
-    const batchRequests = missingEpochs.map(epoch => ({
-      method: 'getInflationReward',
-      params: [[voteAddress], { epoch }],
-    }));
-
-    let selfStakeBatchRequests: Array<{ method: string; params: any[] }> = [];
     const selfStakeAddresses = v.self_stake_addresses || [];
-    if (selfStakeAddresses.length > 0) {
-      selfStakeBatchRequests = missingEpochs.map(epoch => ({
-        method: 'getInflationReward',
-        params: [selfStakeAddresses, { epoch }],
-      }));
-    }
+    const hasSelfStake = selfStakeAddresses.length > 0;
 
-    // Fetch stake history
-    let stakeHistoryMap = new Map<number, number>();
-    if (v.node_pubkey) {
-      try {
-        const historyResponse = await fetch(
-          `https://api.xen.network/v1/x1/validators/${v.node_pubkey}/history?groupBy=epoch&network=mainnet`
-        );
-        if (historyResponse.ok) {
-          const historyData = await historyResponse.json() as any[];
-          historyData.forEach((item: any) => {
-            if (item.epoch !== undefined && item.activatedStake !== undefined) {
-              stakeHistoryMap.set(item.epoch, item.activatedStake / 1e9);
-            }
-          });
-        }
-      } catch { /* ignore */ }
-    }
+    // Build RPC requests
+    const voteRewardRequests = buildInflationRewardRequests([voteAddress], missingEpochs);
+    const selfStakeRequests = hasSelfStake
+      ? buildInflationRewardRequests(selfStakeAddresses, missingEpochs)
+      : [];
 
-    // Load existing timestamps
-    const existingTimestamps = new Map<number, string>();
-    const tsResult = await pool.query('SELECT epoch, timestamp_str FROM epoch_timestamps');
-    tsResult.rows.forEach((r: any) => existingTimestamps.set(r.epoch, r.timestamp_str));
+    // Get timestamps
+    const stakeHistoryMap = v.node_pubkey
+      ? await fetchStakeHistory(v.node_pubkey)
+      : new Map<number, number>();
 
-    // Fetch epoch metadata for missing timestamps
-    let epochSlotMap = new Map<number, number>();
-    try {
-      const epochsMeta = await fetch('https://api.xen.network/v1/x1/epochs').then(r => r.json()) as any[];
-      epochsMeta.forEach((e: any) => epochSlotMap.set(e.epoch, e.endSlot));
-    } catch { /* ignore */ }
+    const existingTimestamps = await getAllTimestamps();
+    const epochSlotMap = await fetchEpochSlotMap();
 
     const epochsNeedingTimestamp = missingEpochs.filter(
       epoch => !existingTimestamps.has(epoch) && epochSlotMap.has(epoch)
     );
-    const timeRequests = epochsNeedingTimestamp.map(epoch => ({
-      method: 'getBlockTime',
-      params: [epochSlotMap.get(epoch)],
-    }));
+    const timeRequests = buildBlockTimeRequests(epochsNeedingTimestamp, epochSlotMap);
 
-    const allRequests = [...batchRequests, ...selfStakeBatchRequests, ...timeRequests];
+    const allRequests = [...voteRewardRequests, ...selfStakeRequests, ...timeRequests];
     const batchResults = await x1Client.batchCall(allRequests);
 
     const voteRewardResults = batchResults.slice(0, missingEpochs.length);
-    const selfStakeResults = batchResults.slice(missingEpochs.length, missingEpochs.length + selfStakeBatchRequests.length);
-    const timeResults = batchResults.slice(missingEpochs.length + selfStakeBatchRequests.length);
+    const selfStakeResults = batchResults.slice(missingEpochs.length, missingEpochs.length + selfStakeRequests.length);
+    const timeResults = batchResults.slice(missingEpochs.length + selfStakeRequests.length);
 
     // Process timestamps
-    const epochTimeMap = new Map(existingTimestamps);
-    const newTimestamps: Array<{ epoch: number; timestampStr: string }> = [];
-    for (let i = 0; i < timeResults.length; i++) {
-      const epoch = epochsNeedingTimestamp[i];
-      const timestamp = timeResults[i];
-      if (timestamp) {
-        const d = new Date(timestamp * 1000);
-        const datePart = d.toLocaleDateString('en-US', { day: '2-digit', month: 'short', year: 'numeric' });
-        const hours = String(d.getHours()).padStart(2, '0');
-        const minutes = String(d.getMinutes()).padStart(2, '0');
-        const timestampStr = `${datePart} ${hours}:${minutes}`;
-        epochTimeMap.set(epoch, timestampStr);
-        newTimestamps.push({ epoch, timestampStr });
-      }
-    }
+    const { epochTimeMap, newTimestamps } = processTimestampResults(
+      timeResults, epochsNeedingTimestamp, existingTimestamps
+    );
+
+    // Process rewards
+    const rewardRows = processEpochRewards(
+      voteRewardResults, selfStakeResults, missingEpochs,
+      epochTimeMap, stakeHistoryMap, hasSelfStake
+    );
 
     // Save to DB
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
-
-      // Save new timestamps
-      for (const { epoch, timestampStr } of newTimestamps) {
-        await client.query(
-          `INSERT INTO epoch_timestamps (epoch, timestamp_str) VALUES ($1, $2) ON CONFLICT (epoch) DO NOTHING`,
-          [epoch, timestampStr]
-        );
-      }
-
-      // Save missing epoch rewards
-      let savedCount = 0;
-      for (let i = 0; i < missingEpochs.length; i++) {
-        const epoch = missingEpochs[i];
-        const result = voteRewardResults[i];
-
-        if (result?.[0]?.amount) {
-          let selfStakeReward = 0;
-          if (selfStakeAddresses.length > 0 && Array.isArray(selfStakeResults[i])) {
-            selfStakeReward = selfStakeResults[i]
-              .filter((r: any) => r && r.amount)
-              .reduce((sum: number, r: any) => sum + r.amount / 1e9, 0);
-          }
-
-          const voteReward = result[0].amount / 1e9;
-          await client.query(
-            `INSERT INTO epoch_rewards (vote_address, epoch, vote_reward, reward, commission, self_stake_reward, date, active_stake, post_balance)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-             ON CONFLICT (vote_address, epoch) DO NOTHING`,
-            [
-              voteAddress, epoch, voteReward, voteReward + selfStakeReward,
-              result[0].commission || 10, selfStakeReward,
-              epochTimeMap.get(epoch) || null,
-              stakeHistoryMap.get(epoch) || 0,
-              result[0].postBalance ? result[0].postBalance / 1e9 : null,
-            ]
-          );
-          savedCount++;
-        }
-      }
-
+      await saveTimestampsBatch(client, newTimestamps);
+      await saveEpochRewardsBatch(client, voteAddress, rewardRows);
       await client.query('COMMIT');
-      console.log(`[resync] ${voteAddress}: filled ${savedCount} missing epochs`);
+      console.log(`[resync] ${voteAddress}: filled ${rewardRows.length} missing epochs`);
     } catch (error) {
       await client.query('ROLLBACK');
       throw error;
@@ -543,14 +388,13 @@ router.post('/:voteAddress/resync', async (req, res) => {
   }
 });
 
-// DELETE /api/validators/:voteAddress - Remove validator from DB
+// DELETE /api/validators/:voteAddress - Soft delete (stop tracking, keep data)
 router.delete('/:voteAddress', async (req, res) => {
   try {
     const { voteAddress } = req.params;
 
-    // CASCADE will delete epoch_rewards too
     const result = await pool.query(
-      'DELETE FROM validators WHERE vote_address = $1 RETURNING vote_address',
+      'UPDATE validators SET is_tracked = false, updated_at = NOW() WHERE vote_address = $1 RETURNING vote_address',
       [voteAddress]
     );
 
@@ -627,19 +471,8 @@ export async function fetchValidatorFromRPC(voteAddress: string): Promise<Valida
   const activatedStake = validatorInfo.activatedStake ? validatorInfo.activatedStake / 1e9 : 0;
   const nodePubkey = validatorInfo.nodePubkey;
 
-  // Fetch validator metadata from xen.network
-  let validatorName: string | undefined;
-  let validatorAvatar: string | undefined;
-  try {
-    const response = await fetch(`https://api.xen.network/v1/x1/validators?network=mainnet&votePubkey=${voteAddress}`);
-    if (response.ok) {
-      const data = await response.json() as any[];
-      validatorName = data[0]?.name || undefined;
-      validatorAvatar = data[0]?.iconUrl || undefined;
-    }
-  } catch {
-    // Silently ignore metadata errors
-  }
+  // Fetch validator metadata
+  const { name: validatorName, avatar: validatorAvatar } = await fetchValidatorMetadata(voteAddress);
 
   // Fetch self-stake addresses
   let selfStakeAddresses: string[] = [];
@@ -652,119 +485,53 @@ export async function fetchValidatorFromRPC(voteAddress: string): Promise<Valida
         selfStakeAmount = accountsInfo.value
           .filter((acc: any) => acc !== null)
           .reduce((sum: number, acc: any) => sum + (acc.lamports || 0), 0) / 1e9;
-      } catch {
-        // Silently ignore
+      } catch (err) {
+        console.warn('[fetchValidatorFromRPC] getMultipleAccounts:', (err as Error).message);
       }
     }
   }
 
-  // Fetch stake history from xen.network
-  let stakeHistoryMap = new Map<number, number>();
-  if (nodePubkey) {
-    try {
-      const historyResponse = await fetch(
-        `https://api.xen.network/v1/x1/validators/${nodePubkey}/history?groupBy=epoch&network=mainnet`
-      );
-      if (historyResponse.ok) {
-        const historyData = await historyResponse.json() as any[];
-        historyData.forEach((item: any) => {
-          if (item.epoch !== undefined && item.activatedStake !== undefined) {
-            stakeHistoryMap.set(item.epoch, item.activatedStake / 1e9);
-          }
-        });
-      }
-    } catch {
-      // Silently ignore
-    }
-  }
+  // Fetch stake history and epoch metadata
+  const stakeHistoryMap = nodePubkey
+    ? await fetchStakeHistory(nodePubkey)
+    : new Map<number, number>();
 
-  // Fetch epoch metadata for timestamps
-  let epochSlotMap = new Map<number, number>();
-  try {
-    const epochsMeta = await fetch('https://api.xen.network/v1/x1/epochs').then(r => r.json()) as any[];
-    epochsMeta.forEach((e: any) => epochSlotMap.set(e.epoch, e.endSlot));
-  } catch {
-    // Silently ignore
-  }
+  const epochSlotMap = await fetchEpochSlotMap();
+  const existingTimestamps = await getAllTimestamps();
 
-  // Load existing timestamps from DB
-  const existingTimestamps = new Map<number, string>();
-  try {
-    const tsResult = await pool.query('SELECT epoch, timestamp_str FROM epoch_timestamps');
-    tsResult.rows.forEach(r => existingTimestamps.set(r.epoch, r.timestamp_str));
-  } catch {
-    // Silently ignore
-  }
+  // Build batch RPC requests for all epochs from beginning
+  const hasSelfStake = selfStakeAddresses.length > 0;
+  const epochNumbers = Array.from({ length: currentEpoch }, (_, i) => currentEpoch - 1 - i).filter(e => e >= 0);
 
-  // Build batch RPC requests for epoch rewards
-  const epochsToFetch = 400;
-  const epochNumbers = Array.from({ length: epochsToFetch }, (_, i) => currentEpoch - i).filter(e => e >= 0);
+  const voteRewardRequests = buildInflationRewardRequests([voteAddress], epochNumbers);
+  const selfStakeRequests = hasSelfStake
+    ? buildInflationRewardRequests(selfStakeAddresses, epochNumbers)
+    : [];
 
-  const batchRequests = epochNumbers.map(epoch => ({
-    method: 'getInflationReward',
-    params: [[voteAddress], { epoch }],
-  }));
-
-  let selfStakeBatchRequests: Array<{ method: string; params: any[] }> = [];
-  if (selfStakeAddresses.length > 0) {
-    selfStakeBatchRequests = epochNumbers.map(epoch => ({
-      method: 'getInflationReward',
-      params: [selfStakeAddresses, { epoch }],
-    }));
-  }
-
-  // Timestamps for epochs we don't have yet
   const epochsNeedingTimestamp = epochNumbers.filter(
     epoch => !existingTimestamps.has(epoch) && epochSlotMap.has(epoch)
   );
-  const timeRequests = epochsNeedingTimestamp.map(epoch => ({
-    method: 'getBlockTime',
-    params: [epochSlotMap.get(epoch)],
-  }));
+  const timeRequests = buildBlockTimeRequests(epochsNeedingTimestamp, epochSlotMap);
 
-  const allRequests = [...batchRequests, ...selfStakeBatchRequests, ...timeRequests];
+  const allRequests = [...voteRewardRequests, ...selfStakeRequests, ...timeRequests];
   console.log(`Fetching ${allRequests.length} RPC requests for ${voteAddress}...`);
   const batchResults = await x1Client.batchCall(allRequests);
 
   const validatorResults = batchResults.slice(0, epochNumbers.length);
-  const selfStakeResults = batchResults.slice(epochNumbers.length, 2 * epochNumbers.length);
-  const timeResults = batchResults.slice(2 * epochNumbers.length);
+  const selfStakeResults = batchResults.slice(epochNumbers.length, epochNumbers.length + selfStakeRequests.length);
+  const timeResults = batchResults.slice(epochNumbers.length + selfStakeRequests.length);
 
   // Process timestamps
-  const epochTimeMap = new Map(existingTimestamps);
-  const newTimestamps: Array<{ epoch: number; timestampStr: string }> = [];
-
-  for (let i = 0; i < timeResults.length; i++) {
-    const epoch = epochsNeedingTimestamp[i];
-    const timestamp = timeResults[i];
-    if (timestamp) {
-      const d = new Date(timestamp * 1000);
-      const datePart = d.toLocaleDateString('en-US', {
-        day: '2-digit',
-        month: 'short',
-        year: 'numeric',
-      });
-      const hours = String(d.getHours()).padStart(2, '0');
-      const minutes = String(d.getMinutes()).padStart(2, '0');
-      const timestampStr = `${datePart} ${hours}:${minutes}`;
-      epochTimeMap.set(epoch, timestampStr);
-      newTimestamps.push({ epoch, timestampStr });
-    }
-  }
+  const { epochTimeMap, newTimestamps } = processTimestampResults(
+    timeResults, epochsNeedingTimestamp, existingTimestamps
+  );
 
   // Save new timestamps to DB
   if (newTimestamps.length > 0) {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
-      for (const { epoch, timestampStr } of newTimestamps) {
-        await client.query(
-          `INSERT INTO epoch_timestamps (epoch, timestamp_str)
-           VALUES ($1, $2)
-           ON CONFLICT (epoch) DO NOTHING`,
-          [epoch, timestampStr]
-        );
-      }
+      await saveTimestampsBatch(client, newTimestamps);
       await client.query('COMMIT');
     } catch (err) {
       await client.query('ROLLBACK');
@@ -775,32 +542,10 @@ export async function fetchValidatorFromRPC(voteAddress: string): Promise<Valida
   }
 
   // Process epoch rewards
-  const epochRewards: EpochReward[] = [];
-  for (let i = 0; i < epochNumbers.length; i++) {
-    const epoch = epochNumbers[i];
-    const result = validatorResults[i];
-
-    if (result?.[0]?.amount) {
-      let selfStakeReward = 0;
-      if (Array.isArray(selfStakeResults[i])) {
-        selfStakeReward = selfStakeResults[i]
-          .filter((r: any) => r && r.amount)
-          .reduce((sum: number, r: any) => sum + r.amount / 1e9, 0);
-      }
-
-      const voteReward = result[0].amount / 1e9;
-      epochRewards.push({
-        epoch,
-        voteReward,
-        reward: voteReward + selfStakeReward,
-        commission: result[0].commission || 10,
-        selfStakeReward,
-        date: epochTimeMap.get(epoch) || undefined,
-        activeStake: stakeHistoryMap.get(epoch) || 0,
-        postBalance: result[0].postBalance ? result[0].postBalance / 1e9 : undefined,
-      });
-    }
-  }
+  const epochRewards = processEpochRewardsForResponse(
+    validatorResults, selfStakeResults, epochNumbers,
+    epochTimeMap, stakeHistoryMap, hasSelfStake
+  );
 
   epochRewards.sort((a, b) => b.epoch - a.epoch);
 
@@ -832,7 +577,6 @@ export async function saveValidatorToDB(data: ValidatorData): Promise<void> {
   try {
     await client.query('BEGIN');
 
-    // Upsert validator
     await client.query(
       `INSERT INTO validators (vote_address, name, avatar, status, activated_stake, commission, current_epoch, self_stake_addresses, self_stake_amount, node_pubkey, updated_at)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
@@ -862,31 +606,19 @@ export async function saveValidatorToDB(data: ValidatorData): Promise<void> {
     );
 
     // Batch upsert epoch rewards
-    for (const r of data.epochRewards) {
-      await client.query(
-        `INSERT INTO epoch_rewards (vote_address, epoch, vote_reward, reward, commission, self_stake_reward, date, active_stake, post_balance)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-         ON CONFLICT (vote_address, epoch) DO UPDATE SET
-           vote_reward = $3,
-           reward = $4,
-           commission = $5,
-           self_stake_reward = $6,
-           date = COALESCE($7, epoch_rewards.date),
-           active_stake = $8,
-           post_balance = $9`,
-        [
-          data.voteAddress,
-          r.epoch,
-          r.voteReward,
-          r.reward,
-          r.commission,
-          r.selfStakeReward || 0,
-          r.date || null,
-          r.activeStake || 0,
-          r.postBalance ?? null,
-        ]
-      );
-    }
+    const rewardRows = data.epochRewards.map(r => ({
+      voteAddress: data.voteAddress,
+      epoch: r.epoch,
+      voteReward: r.voteReward,
+      reward: r.reward,
+      commission: r.commission,
+      selfStakeReward: r.selfStakeReward || 0,
+      date: r.date || null,
+      activeStake: r.activeStake || 0,
+      postBalance: r.postBalance ?? null,
+    }));
+
+    await saveEpochRewardsBatch(client, data.voteAddress, rewardRows, true);
 
     await client.query('COMMIT');
     console.log(`Saved validator ${data.voteAddress} with ${data.epochRewards.length} epoch rewards`);
@@ -896,14 +628,6 @@ export async function saveValidatorToDB(data: ValidatorData): Promise<void> {
   } finally {
     client.release();
   }
-}
-
-// Also save node_pubkey when we fetch validator data
-export async function updateValidatorNodePubkey(voteAddress: string, nodePubkey: string): Promise<void> {
-  await pool.query(
-    'UPDATE validators SET node_pubkey = $1 WHERE vote_address = $2',
-    [nodePubkey, voteAddress]
-  );
 }
 
 export default router;

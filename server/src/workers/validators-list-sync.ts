@@ -1,7 +1,7 @@
 import pool from '../db/connection.js';
+import { fetchValidatorsList } from '../lib/xen-api.js';
 
 const REFRESH_INTERVAL_MS = 6 * 60 * 60_000; // 6 hours (4 times/day)
-const XEN_VALIDATORS_URL = 'https://api.xen.network/v1/x1/validators?network=mainnet&limit=5000';
 
 async function needsRefresh(): Promise<boolean> {
   const result = await pool.query(
@@ -19,18 +19,12 @@ async function syncValidatorsList(): Promise<void> {
     }
 
     console.log('[validators-list-sync] Fetching validators list from xen.network...');
-    const response = await fetch(XEN_VALIDATORS_URL);
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-    }
-
-    const validators = await response.json() as any[];
+    const validators = await fetchValidatorsList();
     console.log(`[validators-list-sync] Fetched ${validators.length} validators`);
 
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
-      await client.query('DELETE FROM validators_list');
 
       for (let i = 0; i < validators.length; i += 100) {
         const chunk = validators.slice(i, i + 100);
@@ -44,15 +38,33 @@ async function syncValidatorsList(): Promise<void> {
         });
 
         await client.query(
-          `INSERT INTO validators_list (vote_pubkey, node_pubkey, name, icon_url) VALUES ${placeholders.join(', ')} ON CONFLICT (vote_pubkey) DO UPDATE SET node_pubkey = EXCLUDED.node_pubkey, name = EXCLUDED.name, icon_url = EXCLUDED.icon_url`,
+          `INSERT INTO validators_list (vote_pubkey, node_pubkey, name, icon_url)
+           VALUES ${placeholders.join(', ')}
+           ON CONFLICT (vote_pubkey) DO UPDATE SET
+             node_pubkey = EXCLUDED.node_pubkey,
+             name = EXCLUDED.name,
+             icon_url = EXCLUDED.icon_url`,
           values
         );
       }
 
+      // Remove validators that are no longer in the list
+      const allPubkeys = validators.map((v: any) => v.votePubkey).filter(Boolean);
+      if (allPubkeys.length > 0) {
+        await client.query(
+          'DELETE FROM validators_list WHERE vote_pubkey != ALL($1)',
+          [allPubkeys]
+        );
+      }
+
+      const refreshIntervalSec = REFRESH_INTERVAL_MS / 1000;
       await client.query(
         `INSERT INTO cache_metadata (cache_key, last_updated, expires_at)
-         VALUES ('validators_list', NOW(), NOW() + INTERVAL '${REFRESH_INTERVAL_MS / 1000} seconds')
-         ON CONFLICT (cache_key) DO UPDATE SET last_updated = NOW(), expires_at = NOW() + INTERVAL '${REFRESH_INTERVAL_MS / 1000} seconds'`
+         VALUES ('validators_list', NOW(), NOW() + $1 * INTERVAL '1 second')
+         ON CONFLICT (cache_key) DO UPDATE SET
+           last_updated = NOW(),
+           expires_at = NOW() + $1 * INTERVAL '1 second'`,
+        [refreshIntervalSec]
       );
 
       await client.query('COMMIT');

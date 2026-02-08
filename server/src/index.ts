@@ -10,16 +10,14 @@ import epochTimestampsRoutes from './routes/epoch-timestamps.js';
 import { startEpochMonitor } from './workers/epoch-monitor.js';
 import { startValidatorsListSync } from './workers/validators-list-sync.js';
 import { x1Client } from './lib/x1-rpc.js';
+import { config } from './lib/config.js';
 
 const app = express();
-const PORT = parseInt(process.env.PORT || '3001', 10);
-const BUILD_VERSION = '1.1.0';
-const BUILD_DATE = '2025-02-08';
 const serverStartedAt = new Date().toISOString();
 
 // Middleware
 app.use(cors({
-  origin: process.env.CORS_ORIGIN || 'http://localhost:8080',
+  origin: config.corsOrigin,
 }));
 app.use(express.json({ limit: '10mb' }));
 
@@ -36,7 +34,9 @@ app.get('/api/epoch-info', async (_req, res) => {
       x1Client.getRecentPerformanceSamples(1),
     ]);
     const sample = (perfSamples as any)?.[0];
-    const slotTime = sample?.samplePeriodSecs / sample?.numSlots || 0.4;
+    const slotTime = (sample?.samplePeriodSecs && sample?.numSlots)
+      ? sample.samplePeriodSecs / sample.numSlots
+      : 0.4;
     res.json({
       epoch: epochInfo.epoch,
       slotIndex: epochInfo.slotIndex,
@@ -53,8 +53,8 @@ app.get('/api/epoch-info', async (_req, res) => {
 app.get('/api/health', (_req, res) => {
   res.json({
     status: 'ok',
-    version: BUILD_VERSION,
-    buildDate: BUILD_DATE,
+    version: config.buildVersion,
+    buildDate: config.buildDate,
     startedAt: serverStartedAt,
   });
 });
@@ -68,8 +68,8 @@ async function start() {
     startEpochMonitor();
     startValidatorsListSync();
 
-    app.listen(PORT, () => {
-      console.log(`Server running on port ${PORT} (build: 2025-02-08-epoch-info)`);
+    app.listen(config.port, () => {
+      console.log(`Server running on port ${config.port} (build: ${config.buildVersion})`);
     });
   } catch (error) {
     console.error('Failed to start server:', error);
