@@ -15,7 +15,7 @@ import {
   Check,
   CircleAlert
 } from "lucide-react";
-import authorAvatar from "@/assets/author-avatar.jpg";
+import { Footer } from "./Footer";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -565,7 +565,7 @@ export const ValidatorDashboard = () => {
               {/*    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />*/}
               {/*  </svg>*/}
               {/*</a>*/}
-              <Navigation />
+              <Navigation showNavigation={true} />
               {validators.length > 0 && (
                   <Button
                       variant="outline"
@@ -991,38 +991,7 @@ export const ValidatorDashboard = () => {
         )}
       </main>
 
-      {/* Footer */}
-      <footer className="border-t bg-card mt-auto">
-        <div className="container mx-auto px-4 py-6 flex  text-xs sm:text-sm justify-center flex-wrap gap-4 lg:justify-between">
-          <div className="flex items-center justify-center gap-2 text-muted-foreground flex-wrap"><a
-              href="https://x.com/JustDeMatt"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-2 hover:text-foreground transition-colors"
-          >
-            <img
-                src={authorAvatar}
-                alt="JustDeMatt"
-                className="h-6 w-6 rounded-full"
-            />
-          </a> Support my work with XNT:
-            <span onCopy={() => {
-                  if (typeof window !== "undefined" && (window as any).gtag) {
-                    (window as any).gtag("event", "copy_support_wallet_address", {
-                      event_category: "engagement",
-                      event_label: "footer__copy_support_wallet_address",
-                      value: "DrLEY6BaUPWPbZ8qu3mR7wDGtgZzuR4hSJRNmSPq3Zpu",
-                    });
-                  }
-                }}
-                className="cursor-text select-text underline decoration-dotted"
-                title="Copy or select to copy">DrLEY6BaUPWPbZ8qu3mR7wDGtgZzuR4hSJRNmSPq3Zpu</span>
-          </div>
-          <div className="flex items-center justify-center gap-2 text-muted-foreground">
-            <p>Made with <span className="text-red-500">❤</span> in Poland</p>
-          </div>
-        </div>
-      </footer>
+      <Footer />
     </div>
     </ChartSettingsProvider>
   );

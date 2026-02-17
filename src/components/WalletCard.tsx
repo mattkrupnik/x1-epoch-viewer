@@ -30,6 +30,7 @@ export const WalletCard = ({
     address: wallet.address,
     solBalance: wallet.solBalance,
     tokenCount: wallet.tokens.length,
+    accountType: wallet.accountType,
     isCopied: copied,
     onCopy: copyAddress,
     onRemove

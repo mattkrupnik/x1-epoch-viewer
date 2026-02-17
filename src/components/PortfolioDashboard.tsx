@@ -1,42 +1,58 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { Wallet, Plus, RefreshCw } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Accordion } from "@/components/ui/accordion";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
-import { ThemeSwitcher } from "./ThemeSwitcher";
+import { SettingsDialog } from "./SettingsDialog";
 import { Navigation } from "./Navigation";
 import { WalletCard } from "./WalletCard";
 import { PortfolioStats } from "./PortfolioStats";
 import { AggregatedTokensTable } from "./AggregatedTokensTable";
-import { getMultipleWalletBalances, WalletBalance } from "@/lib/wallet-rpc";
+import { getMultipleWalletBalances, WalletBalance, WalletAccountType } from "@/lib/wallet-rpc";
+import { Footer } from "./Footer";
 
 const STORAGE_KEY = "portfolioWallets";
 const ACCORDION_STATE_KEY = "portfolioAccordionState";
 
+interface SavedWallet {
+  address: string;
+  accountType: WalletAccountType;
+}
+
 export const PortfolioDashboard = () => {
   const [walletAddress, setWalletAddress] = useState("");
   const [wallets, setWallets] = useState<WalletBalance[]>([]);
-  const [savedAddresses, setSavedAddresses] = useState<string[]>([]);
+  const [savedWallets, setSavedWallets] = useState<SavedWallet[]>([]);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
   const [openAccordions, setOpenAccordions] = useState<string[]>([]);
+  const [activeTab, setActiveTab] = useState<"all" | WalletAccountType>("all");
 
   // Load saved addresses and accordion state from localStorage
   useEffect(() => {
     const saved = localStorage.getItem(STORAGE_KEY);
-    let addresses: string[] = [];
+    let loaded: SavedWallet[] = [];
     if (saved) {
       try {
-        addresses = JSON.parse(saved);
-        setSavedAddresses(addresses);
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          if (typeof parsed[0] === "string") {
+            // Migrate old format: string[] → SavedWallet[]
+            loaded = parsed.map((addr: string) => ({ address: addr, accountType: "wallet" as WalletAccountType }));
+          } else {
+            loaded = parsed;
+          }
+          setSavedWallets(loaded);
+        }
       } catch (error) {
         console.error("Failed to parse saved wallets:", error);
       }
     }
-    
+
     const savedAccordionState = localStorage.getItem(ACCORDION_STATE_KEY);
     if (savedAccordionState) {
       try {
@@ -45,21 +61,21 @@ export const PortfolioDashboard = () => {
         console.error("Error loading accordion state:", error);
       }
     }
-    
+
     // Auto-expand if only one address
-    if (addresses.length === 1) {
-      setOpenAccordions([addresses[0]]);
+    if (loaded.length === 1) {
+      setOpenAccordions([loaded[0].address]);
     }
-    
+
     setInitialLoading(false);
   }, []);
 
-  // Save addresses to localStorage
+  // Save wallets to localStorage
   useEffect(() => {
     if (!initialLoading) {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(savedAddresses));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(savedWallets));
     }
-  }, [savedAddresses, initialLoading]);
+  }, [savedWallets, initialLoading]);
 
   // Save accordion state to localStorage
   useEffect(() => {
@@ -68,32 +84,49 @@ export const PortfolioDashboard = () => {
     }
   }, [openAccordions, wallets.length]);
 
+  // Stable address list key to avoid re-fetching on accountType updates
+  const addressListKey = savedWallets.map(w => w.address).join(",");
+  const savedWalletsRef = useRef(savedWallets);
+  savedWalletsRef.current = savedWallets;
+
   // Fetch balances when addresses change
   useEffect(() => {
-    if (savedAddresses.length > 0 && !initialLoading) {
+    if (addressListKey && !initialLoading) {
       refreshWallets();
-    } else if (savedAddresses.length === 0) {
+    } else if (!addressListKey) {
       setWallets([]);
     }
-  }, [savedAddresses, initialLoading]);
+  }, [addressListKey, initialLoading]);
 
-  const refreshWallets = async () => {
-    if (savedAddresses.length === 0) return;
-    
+  const refreshWallets = useCallback(async () => {
+    const current = savedWalletsRef.current;
+    if (current.length === 0) return;
+
     setRefreshing(true);
     try {
-      const balances = await getMultipleWalletBalances(savedAddresses);
+      const addresses = current.map(w => w.address);
+      const balances = await getMultipleWalletBalances(addresses);
       setWallets(balances);
+      // Update saved wallets with detected account types (won't re-trigger fetch)
+      setSavedWallets(prev => {
+        const updated = prev.map((sw, i) => ({
+          ...sw,
+          accountType: balances[i]?.accountType ?? sw.accountType,
+        }));
+        // Only update if types actually changed
+        const changed = updated.some((u, i) => u.accountType !== prev[i].accountType);
+        return changed ? updated : prev;
+      });
     } catch (error) {
       console.error("Failed to refresh wallets:", error);
       toast.error("Failed to refresh wallet balances");
     }
     setRefreshing(false);
-  };
+  }, []);
 
   const addWallet = async () => {
     const address = walletAddress.trim();
-    
+
     if (!address) {
       toast.error("Please enter a wallet address");
       return;
@@ -105,7 +138,7 @@ export const PortfolioDashboard = () => {
       return;
     }
 
-    if (savedAddresses.includes(address)) {
+    if (savedWallets.some(w => w.address === address)) {
       toast.error("Wallet already added");
       return;
     }
@@ -113,7 +146,7 @@ export const PortfolioDashboard = () => {
     setLoading(true);
     try {
       const [balance] = await getMultipleWalletBalances([address]);
-      setSavedAddresses(prev => [...prev, address]);
+      setSavedWallets(prev => [...prev, { address, accountType: balance.accountType }]);
       setWallets(prev => [...prev, balance]);
       setWalletAddress("");
       // Auto-expand newly added wallet
@@ -127,7 +160,7 @@ export const PortfolioDashboard = () => {
   };
 
   const removeWallet = (address: string) => {
-    setSavedAddresses(prev => prev.filter(a => a !== address));
+    setSavedWallets(prev => prev.filter(w => w.address !== address));
     setWallets(prev => prev.filter(w => w.address !== address));
     setOpenAccordions(prev => prev.filter(a => a !== address));
     toast.success("Wallet removed");
@@ -139,8 +172,16 @@ export const PortfolioDashboard = () => {
     }
   };
 
-  const totalSolBalance = wallets.reduce((sum, w) => sum + w.solBalance, 0);
-  const totalTokenCount = wallets.reduce((sum, w) => sum + w.tokens.length, 0);
+  const filteredWallets = activeTab === "all"
+    ? wallets
+    : wallets.filter(w => w.accountType === activeTab);
+
+  const tabCounts = {
+    all: wallets.length,
+    vote: wallets.filter(w => w.accountType === "vote").length,
+    stake: wallets.filter(w => w.accountType === "stake").length,
+    wallet: wallets.filter(w => w.accountType === "wallet").length,
+  };
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
@@ -159,7 +200,7 @@ export const PortfolioDashboard = () => {
               </div>
             </div>
             <div className="flex items-center gap-2 flex-shrink-0">
-              <Navigation />
+              <Navigation showNavigation={true} />
               {wallets.length > 0 && (
                 <Button
                   variant="outline"
@@ -172,7 +213,7 @@ export const PortfolioDashboard = () => {
                   <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
                 </Button>
               )}
-              <ThemeSwitcher />
+              <SettingsDialog page="portfolio" />
             </div>
           </div>
         </div>
@@ -210,16 +251,28 @@ export const PortfolioDashboard = () => {
           </CardContent>
         </Card>
 
-        {/* Summary Stats - separate boxes like Validators */}
+        {/* Summary Stats */}
         {wallets.length > 0 && (
           <>
             <PortfolioStats
               walletsCount={wallets.length}
-              totalXnt={totalSolBalance}
-              totalTokens={totalTokenCount}
+              totalXnt={wallets.reduce((sum, w) => sum + w.solBalance, 0)}
+              totalTokens={wallets.reduce((sum, w) => sum + w.tokens.length, 0)}
             />
             <AggregatedTokensTable wallets={wallets} />
           </>
+        )}
+
+        {/* Wallet Type Tabs */}
+        {wallets.length > 0 && (
+          <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "all" | WalletAccountType)}>
+            <TabsList>
+              <TabsTrigger value="all">All ({tabCounts.all})</TabsTrigger>
+              <TabsTrigger value="vote">Vote ({tabCounts.vote})</TabsTrigger>
+              <TabsTrigger value="stake">Stake ({tabCounts.stake})</TabsTrigger>
+              <TabsTrigger value="wallet">Wallet ({tabCounts.wallet})</TabsTrigger>
+            </TabsList>
+          </Tabs>
         )}
 
         {/* Wallet List - Empty State */}
@@ -235,15 +288,28 @@ export const PortfolioDashboard = () => {
           </Card>
         )}
 
+        {/* Filtered empty state */}
+        {wallets.length > 0 && filteredWallets.length === 0 && (
+          <Card className="border-dashed">
+            <CardContent className="py-12 text-center">
+              <Wallet className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
+              <h3 className="text-lg font-medium mb-2">No {activeTab} accounts</h3>
+              <p className="text-muted-foreground">
+                None of your tracked wallets are {activeTab} accounts
+              </p>
+            </CardContent>
+          </Card>
+        )}
+
         {/* Wallet List - With Accordion like ValidatorCard */}
-        {wallets.length > 0 && (
+        {filteredWallets.length > 0 && (
           <Accordion
             type="multiple"
             value={openAccordions}
             onValueChange={setOpenAccordions}
             className="space-y-4"
           >
-            {wallets.map((wallet) => (
+            {filteredWallets.map((wallet) => (
               <WalletCard
                 key={wallet.address}
                 wallet={wallet}
@@ -256,11 +322,7 @@ export const PortfolioDashboard = () => {
         )}
       </main>
 
-      <footer className="border-t bg-card mt-auto">
-        <div className="container mx-auto px-4 py-4 text-center text-sm text-muted-foreground">
-          Portfolio data from X1 Network RPC
-        </div>
-      </footer>
+      <Footer />
     </div>
   );
 };

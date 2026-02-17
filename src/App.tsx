@@ -27,8 +27,8 @@ const App = () => {
         <BrowserRouter>
           <Routes>
             <Route path="/" element={<Index />} />
-            {/*<Route path="/portfolio" element={<Portfolio />} />*/}
-            {/*<Route path="/portfolio/:address" element={<Address />} />*/}
+            <Route path="/portfolio" element={<Portfolio />} />
+            <Route path="/portfolio/:address" element={<Address />} />
             <Route path="/validator/:address" element={<Validator />} />
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
             <Route path="*" element={<NotFound />} />

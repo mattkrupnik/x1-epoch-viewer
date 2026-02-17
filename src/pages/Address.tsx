@@ -3,12 +3,14 @@ import { useEffect, useState } from "react";
 import { Wallet, ArrowLeft, RefreshCw, Copy, Check } from "lucide-react";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { ThemeSwitcher } from "@/components/ThemeSwitcher";
+import { Badge } from "@/components/ui/badge";
+import { SettingsDialog } from "@/components/SettingsDialog";
 import { Navigation } from "@/components/Navigation";
 import { WalletTokens } from "@/components/WalletTokens";
 import { getMultipleWalletBalances, WalletBalance } from "@/lib/wallet-rpc";
 import { formatXNT } from "@/lib/format";
 import { toast } from "sonner";
+import { Footer } from "@/components/Footer";
 
 const Address = () => {
   const { address } = useParams<{ address: string }>();
@@ -75,7 +77,7 @@ const Address = () => {
                   <ArrowLeft className="h-4 w-4" />
                 </Button>
               </Link>
-              <Navigation />
+              <Navigation showNavigation={true} />
               <Button
                 variant="outline"
                 size="icon"
@@ -86,7 +88,7 @@ const Address = () => {
               >
                 <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
               </Button>
-              <ThemeSwitcher />
+              <SettingsDialog page="portfolio" />
             </div>
           </div>
         </div>
@@ -122,6 +124,9 @@ const Address = () => {
                     </Button>
                   </div>
                   <div className="flex items-center gap-4 text-sm">
+                    <Badge variant={wallet.accountType} className="text-xs capitalize">
+                      {wallet.accountType}
+                    </Badge>
                     <div>
                       <span className="text-muted-foreground">Balance: </span>
                       <span className="font-medium">{formatXNT(wallet.solBalance)} XNT</span>
@@ -158,11 +163,7 @@ const Address = () => {
         )}
       </main>
 
-      <footer className="border-t bg-card mt-auto">
-        <div className="container mx-auto px-4 py-4 text-center text-sm text-muted-foreground">
-          Wallet data from X1 Network RPC
-        </div>
-      </footer>
+      <Footer />
     </div>
   );
 };

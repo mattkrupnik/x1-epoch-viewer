@@ -2,11 +2,14 @@ import { Copy, Check, ExternalLink, Trash2, Coins } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { formatXNT } from "@/lib/format";
+import { Link } from "react-router-dom";
+import { WalletAccountType } from "@/lib/wallet-rpc";
 
 interface WalletHeaderProps {
   address: string;
   solBalance: number;
   tokenCount: number;
+  accountType: WalletAccountType;
   isCopied: boolean;
   onCopy: () => void;
   onRemove: () => void;
@@ -16,6 +19,7 @@ export const WalletHeader = ({
   address,
   solBalance,
   tokenCount,
+  accountType,
   isCopied,
   onCopy,
   onRemove
@@ -30,9 +34,14 @@ export const WalletHeader = ({
         </div>
         <div>
           <div className="flex items-center gap-2">
-            <span className="font-mono text-base font-semibold">
+            <Link
+              to={`/portfolio/${address}`}
+              className="font-mono text-base font-semibold hover:underline"
+              onClick={(e) => e.stopPropagation()}
+              title="Open wallet details"
+            >
               {truncateAddress(address)}
-            </span>
+            </Link>
             <Button
               variant="ghost"
               size="icon"
@@ -59,6 +68,9 @@ export const WalletHeader = ({
             </a>
           </div>
           <div className="flex items-center gap-2 mt-1">
+            <Badge variant={accountType} className="text-xs capitalize">
+              {accountType}
+            </Badge>
             <Badge variant="secondary" className="text-xs">
               {formatXNT(solBalance)} XNT
             </Badge>
@@ -73,7 +85,7 @@ export const WalletHeader = ({
       <Button
         variant="ghost"
         size="icon"
-        className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10 self-end sm:self-auto"
+        className="h-8 w-8 bg-secondary/50 text-muted-foreground hover:bg-secondary hover:text-foreground self-end sm:self-auto"
         onClick={(e) => {
           e.stopPropagation();
           onRemove();

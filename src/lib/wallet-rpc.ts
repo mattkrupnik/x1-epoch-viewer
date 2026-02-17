@@ -1,6 +1,8 @@
 // Wallet RPC utilities for fetching token balances
 import { x1Client } from "./x1-rpc";
 
+export type WalletAccountType = "vote" | "stake" | "wallet";
+
 export interface TokenBalance {
   mint: string;
   amount: number;
@@ -15,7 +17,12 @@ export interface WalletBalance {
   address: string;
   solBalance: number;
   tokens: TokenBalance[];
+  accountType: WalletAccountType;
 }
+
+// Program IDs for account type detection
+const VOTE_PROGRAM_ID = "Vote111111111111111111111111111111111111111";
+const STAKE_PROGRAM_ID = "Stake11111111111111111111111111111111111111";
 
 // Token Program IDs
 const TOKEN_PROGRAM_ID = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
@@ -27,18 +34,24 @@ const METAPLEX_PROGRAM_ID = "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s";
 // Cache for token metadata to avoid repeated RPC calls
 const metadataCache: Map<string, { symbol: string; name: string; logoURI?: string }> = new Map();
 
+function detectAccountTypeFromOwner(owner: string | undefined): WalletAccountType {
+  if (owner === VOTE_PROGRAM_ID) return "vote";
+  if (owner === STAKE_PROGRAM_ID) return "stake";
+  return "wallet";
+}
+
 export async function getWalletBalance(address: string): Promise<WalletBalance> {
   try {
-    // Get native balance (XNT/SOL)
-    const balanceResult = await x1Client.call("getBalance", [address]);
-    // getBalance returns the value directly, not nested in .value
-    const solBalance = (typeof balanceResult === 'number' ? balanceResult : (balanceResult?.value || 0)) / 1e9;
-
-    // Fetch tokens from both Token Program and Token-2022 in parallel
-    const [tokenAccountsLegacy, tokenAccounts2022] = await Promise.all([
+    // Get account info (balance + owner/type), and token accounts in parallel
+    const [accountInfo, tokenAccountsLegacy, tokenAccounts2022] = await Promise.all([
+      x1Client.call("getAccountInfo", [address, { encoding: "jsonParsed" }]),
       fetchTokenAccounts(address, TOKEN_PROGRAM_ID),
       fetchTokenAccounts(address, TOKEN_2022_PROGRAM_ID),
     ]);
+    // Extract balance and account type from single getAccountInfo call
+    const lamports = accountInfo?.value?.lamports ?? 0;
+    const solBalance = lamports / 1e9;
+    const accountType = detectAccountTypeFromOwner(accountInfo?.value?.owner);
 
     const allTokenAccounts = [...tokenAccountsLegacy, ...tokenAccounts2022];
     
@@ -81,6 +94,7 @@ export async function getWalletBalance(address: string): Promise<WalletBalance> 
       address,
       solBalance,
       tokens,
+      accountType,
     };
   } catch (error) {
     console.error("Failed to get wallet balance:", error);
@@ -88,6 +102,7 @@ export async function getWalletBalance(address: string): Promise<WalletBalance> 
       address,
       solBalance: 0,
       tokens: [],
+      accountType: "wallet",
     };
   }
 }

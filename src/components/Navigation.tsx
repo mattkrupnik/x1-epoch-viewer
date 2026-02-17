@@ -1,7 +1,6 @@
 import { Link, useLocation } from "react-router-dom";
 import { Coins, Wallet } from "lucide-react";
 import { cn } from "@/lib/utils";
-import {WalletBalance} from "@/lib/wallet-rpc.ts";
 
 interface NavigationProps {
   showNavigation?: boolean;
@@ -15,8 +14,8 @@ export const Navigation = (
   const location = useLocation();
   
   const links = [
-    { to: "/", label: "Validators", icon: Coins }
-    // { to: "/portfolio", label: "Portfolio", icon: Wallet },
+    { to: "/", label: "Validators", icon: Coins },
+    { to: "/portfolio", label: "Portfolio", icon: Wallet },
   ];
 
   if (!showNavigation){
@@ -26,7 +25,10 @@ export const Navigation = (
   return (
     <nav className="flex items-center gap-1 sm:gap-2">
       {links.map((link) => {
-        const isActive = location.pathname === link.to;
+        const isActive =
+          link.to === "/"
+            ? location.pathname === "/"
+            : location.pathname === link.to || location.pathname.startsWith(`${link.to}/`);
         const Icon = link.icon;
         
         return (
