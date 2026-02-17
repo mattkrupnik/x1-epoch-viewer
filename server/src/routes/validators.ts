@@ -29,7 +29,14 @@ async function syncMissingEpochs(v: any, currentRpcEpoch: number): Promise<void>
   );
   const maxEpochInDB = maxEpochResult.rows[0]?.max_epoch || 0;
 
-  if (maxEpochInDB >= latestRewardEpoch) return;
+  if (maxEpochInDB >= latestRewardEpoch) {
+    // epoch_rewards are up to date — ensure current_epoch in DB is also current
+    await pool.query(
+      'UPDATE validators SET current_epoch = $1, updated_at = NOW() WHERE vote_address = $2',
+      [currentRpcEpoch, v.vote_address]
+    );
+    return;
+  }
 
   const missingEpochs: number[] = [];
   for (let e = maxEpochInDB + 1; e <= latestRewardEpoch; e++) {
@@ -104,6 +111,47 @@ async function syncMissingEpochs(v: any, currentRpcEpoch: number): Promise<void>
   }
 }
 
+// Helper: Refresh current validator fields from RPC (status, stake, commission, self_stake_amount)
+async function refreshValidatorFields(voteAddress: string): Promise<void> {
+  const freshVoteAccounts = await x1Client.getVoteAccounts();
+  const freshActive = freshVoteAccounts.current?.find((a: any) => a.votePubkey === voteAddress);
+  const freshDelinquent = freshVoteAccounts.delinquent?.find((a: any) => a.votePubkey === voteAddress);
+  const freshAccount = freshActive || freshDelinquent;
+
+  if (!freshAccount) return;
+
+  const newStatus = freshActive ? 'active' : 'delinquent';
+  const newActivatedStake = freshAccount.activatedStake ? freshAccount.activatedStake / 1e9 : 0;
+  const newCommission = freshAccount.commission;
+
+  const storedResult = await pool.query(
+    'SELECT self_stake_addresses, self_stake_amount FROM validators WHERE vote_address = $1',
+    [voteAddress]
+  );
+  const stored = storedResult.rows[0];
+  const storedAddresses: string[] = stored?.self_stake_addresses || [];
+  let newSelfStakeAmount = stored?.self_stake_amount ?? 0;
+
+  if (storedAddresses.length > 0) {
+    try {
+      const accountsInfo = await x1Client.getMultipleAccounts(storedAddresses);
+      newSelfStakeAmount = accountsInfo.value
+        .filter((acc: any) => acc !== null)
+        .reduce((sum: number, acc: any) => sum + (acc.lamports || 0), 0) / 1e9;
+    } catch (err) {
+      console.error(`[refreshValidatorFields] ${voteAddress}: getMultipleAccounts failed:`, (err as Error).message);
+    }
+  }
+
+  await pool.query(
+    `UPDATE validators
+     SET status = $1, activated_stake = $2, commission = $3, self_stake_amount = $4, updated_at = NOW()
+     WHERE vote_address = $5`,
+    [newStatus, newActivatedStake, newCommission, newSelfStakeAmount, voteAddress]
+  );
+  console.log(`[refreshValidatorFields] ${voteAddress}: stake=${newActivatedStake}, selfStake=${newSelfStakeAmount}, status=${newStatus}`);
+}
+
 // GET /api/validators/search?q= - Search validators list
 router.get('/search', async (req, res) => {
   try {
@@ -159,7 +207,7 @@ router.get('/:voteAddress', async (req, res) => {
         [voteAddress, epochInfo.epoch - 1]
       );
 
-      if (latestCheck.rows.length === 0) {
+      if (latestCheck.rows.length === 0 || v.current_epoch !== epochInfo.epoch) {
         await syncMissingEpochs(v, epochInfo.epoch);
       }
     } catch (syncError) {
@@ -257,7 +305,12 @@ router.post('/', async (req, res) => {
         );
       }
 
-      // Sync missing epochs before returning
+      // Refresh validator fields and sync missing epochs before returning
+      try {
+        await refreshValidatorFields(voteAddress);
+      } catch (refreshErr) {
+        console.warn('[POST validator] Field refresh failed:', (refreshErr as Error).message);
+      }
       try {
         const epochInfo = await x1Client.getEpochInfo();
         const v = (await pool.query('SELECT * FROM validators WHERE vote_address = $1', [voteAddress])).rows[0];
@@ -303,6 +356,13 @@ router.post('/:voteAddress/resync', async (req, res) => {
 
     const v = validatorResult.rows[0];
 
+    // Refresh current validator fields from RPC (status, stake, commission, self_stake_amount)
+    try {
+      await refreshValidatorFields(voteAddress);
+    } catch (refreshErr) {
+      console.error(`[resync] ${voteAddress}: failed to refresh validator fields:`, (refreshErr as Error).message);
+    }
+
     // Get existing epochs from DB
     const existingEpochs = await pool.query(
       'SELECT epoch FROM epoch_rewards WHERE vote_address = $1',
@@ -313,6 +373,12 @@ router.post('/:voteAddress/resync', async (req, res) => {
     // Get current epoch from RPC
     const epochInfo = await x1Client.getEpochInfo();
     const currentEpoch = epochInfo.epoch;
+
+    // Always keep current_epoch in DB up to date
+    await pool.query(
+      'UPDATE validators SET current_epoch = $1, updated_at = NOW() WHERE vote_address = $2',
+      [currentEpoch, voteAddress]
+    );
 
     // Find missing epochs (all from beginning)
     const allEpochs = Array.from({ length: currentEpoch }, (_, i) => currentEpoch - 1 - i).filter(e => e >= 0);
