@@ -1,142 +1,213 @@
-# X1 Epoch Viewer – Validator Rewards Dashboard
+# X1 Rewards
 
-A web-based dashboard for monitoring X1 Network validators and their epoch rewards. Track multiple validators, view reward history with interactive charts, and analyze staking performance in real-time.
+`x1rewards.xyz` is a full-stack dashboard for checking rewards earned by validators on the X1 Network.  
+Track multiple validators, review epoch-by-epoch reward history, and keep data updated with automatic backend workers.
 
 ## 📌 Features
 
-- Track multiple validators simultaneously by vote address.
-- View detailed epoch-by-epoch reward breakdown (vote rewards, self-stake rewards, total).
-- Interactive time-series charts with per-validator and summed view modes.
-- Validator statistics: total rewards, average reward, last epoch reward with trend indicator.
-- Activated stake, self-stake amount, commission, block production, and skipped slots.
-- Validator search with autocomplete powered by local IndexedDB cache.
-- Share validator link and copy-to-clipboard for vote addresses.
-- Configurable chart settings: epoch range (15, 30, 45), post-balance overlay.
-- Epoch progress indicator with real-time slot tracking.
-- Dark/Light theme with persistent preference.
-- Responsive mobile-first design.
-- Smart data caching with localStorage and IndexedDB to minimize RPC calls.
-- Batch RPC requests chunked to avoid payload limits.
+- Track multiple validators by vote address
+- Epoch-by-epoch reward history with interactive charts and tables
+- Per-validator and combined rewards visualization
+- Self-stake rewards, activated stake, commission, and block production metrics
+- Real-time epoch progress and slot tracking
+- Validator search/autocomplete powered by synced network metadata
+- Soft delete for tracked validators (history preserved for fast restore)
+- Dark/light theme with responsive UI
+- Caching and batched RPC calls to reduce request overhead
 
----
+## 🧱 Architecture
 
-## 🚀 Installation
-
-### 1️⃣ Clone the repository
-```sh
-git clone https://github.com/mattkrupnik/x1-epoch-viewer.git
+```text
+Frontend (React + Vite) -> Backend (Express) -> PostgreSQL
+                        -> X1 RPC (mainnet)
+                        -> xen.network API
 ```
 
-### 2️⃣ Navigate into the project directory
-```sh
-cd x1-epoch-viewer
+- Frontend: React 18, TypeScript, Vite, shadcn/ui, Tailwind CSS, Recharts, TanStack Query
+- Backend: Express.js, TypeScript, node-postgres
+- Database: PostgreSQL 16
+- Deployment: Docker, Docker Compose, Nginx
+
+## 🚀 Quick Start (Development)
+
+### ✅ Prerequisites
+
+- Node.js 22+
+- Docker
+
+### 1. 🐘 Start PostgreSQL
+
+```bash
+docker compose up -d
 ```
 
-### 3️⃣ Install dependencies
-> **Node.js is required to run this application.**
-> https://nodejs.org/en/download
-```sh
+Database is exposed on `localhost:5433`.
+
+### 2. 📦 Install Dependencies
+
+```bash
 npm install
+cd server && npm install && cd ..
 ```
 
-### 4️⃣ Start the development server
-```sh
+### 3. ▶️ Run Backend and Frontend
+
+Use two terminals:
+
+```bash
+# Terminal 1
+cd server && npm run dev
+```
+
+```bash
+# Terminal 2
 npm run dev
 ```
 
-The app will start on `http://localhost:8080`.
+Open `http://localhost:8080`.
 
----
+## 🏗 Production Deployment
 
-## 🏗 Build for Production
-
-```sh
-npm run build
+```bash
+cp .env.production.example .env.production
+docker compose -f docker-compose.prod.yml up -d --build
 ```
 
-This creates a `dist` folder with static files ready for deployment to any hosting platform (Vercel, Netlify, Cloudflare Pages, or your own server).
+For first-time VPS setup:
 
-### Nginx configuration example
-
-```nginx
-server {
-    listen 80;
-    server_name your-domain.com;
-    root /path/to/dist;
-    index index.html;
-
-    location / {
-        try_files $uri $uri/ /index.html;
-    }
-}
+```bash
+bash scripts/setup-vps.sh
 ```
 
----
+## 🌐 Local Domain Without DNS (Optional)
 
-## 🛠 Tech Stack
+Add a hosts entry on your machine:
 
-- **React 18** – UI framework
-- **TypeScript** – Type safety
-- **Vite** – Build tool and dev server
-- **Tailwind CSS** – Utility-first styling
-- **shadcn/ui + Radix UI** – Accessible component library
-- **Recharts** – Interactive charts
-- **TanStack React Query** – Server state management and caching
-- **React Router** – Client-side routing
+```txt
+127.0.0.1 x1.local
+```
 
----
+Then set `DOMAIN=x1.local` (for production compose/Nginx template usage) and access the app via `http://x1.local`.
 
-## 📡 Data Sources
+## ⚙️ Environment Variables
 
-- **X1 Network RPC** (`https://rpc.mainnet.x1.xyz`) – Epoch info, vote accounts, inflation rewards, block production, stake accounts.
-- **Xen Network API** (`https://api.xen.network`) – Validator metadata (name, avatar), epoch history, stake history.
+### Backend (`server/.env`)
 
----
+| Variable | Default | Description |
+| --- | --- | --- |
+| `DATABASE_URL` | `postgresql://postgres:password@localhost:5433/x1_epoch_viewer` | PostgreSQL connection string |
+| `PORT` | `3001` | Backend server port |
+| `CORS_ORIGIN` | `http://localhost:8080` | Allowed CORS origin |
+| `X1_RPC_URL` | `https://rpc.mainnet.x1.xyz` | X1 RPC endpoint |
+| `XEN_API_URL` | `https://api.xen.network` | Xen.network API endpoint |
 
-## 📋 Pages
+### Frontend (`.env.local`)
 
-| Route | Description |
-|-------|-------------|
-| `/` | Main dashboard – add and monitor validators |
-| `/validator/:address` | Detailed validator view with charts and epoch table |
+| Variable | Default | Description |
+| --- | --- | --- |
+| `VITE_API_URL` | empty (same-origin) | Backend API URL |
+| `VITE_X1_RPC_URL` | `https://rpc.mainnet.x1.xyz` | X1 RPC URL for browser calls |
 
----
+### Production (`.env.production`)
 
-## ⚙️ Configuration
+| Variable | Default | Description |
+| --- | --- | --- |
+| `DOMAIN` | required | Domain for Nginx server_name/CORS |
+| `POSTGRES_PASSWORD` | required | PostgreSQL password |
+| `X1_RPC_URL` | `https://rpc.mainnet.x1.xyz` | Optional RPC override |
 
-Dashboard behavior can be adjusted in `src/config/dashboard.ts`:
+## 📡 API Endpoints
 
-- `SHOW_COMBINED_CHART` – Display multi-validator comparison chart.
-- `USE_ACCORDION` – Collapsible validator cards.
-- `DEFAULT_ACCORDION_EXPANDED` – Start validators expanded or collapsed.
-- `ALLOW_REMOVE_VALIDATOR` – Allow removing validators from the list.
-- `SHOW_CHART_MODE_TOGGLE` – Toggle between per-validator and summed chart modes.
-- `USE_AUTOCOMPLETE` – Enable validator address autocomplete search.
+### Validators
 
----
+| Method | Path | Description |
+| --- | --- | --- |
+| `GET` | `/api/validators/search?q=` | Search validators by name or address |
+| `GET` | `/api/validators/:address` | Get validator data (auto-sync missing epochs) |
+| `GET` | `/api/validators/:address/status` | Check whether validator exists locally |
+| `POST` | `/api/validators` | Add or reactivate validator |
+| `POST` | `/api/validators/:address/resync` | Re-fetch missing epoch rewards |
+| `DELETE` | `/api/validators/:address` | Soft delete tracked validator |
 
-## 🐛 Issues & Feedback
+### Epoch and Cache
 
-Found a bug or have a feature request? Please open an issue on GitHub:
+| Method | Path | Description |
+| --- | --- | --- |
+| `GET` | `/api/epoch-info` | Current epoch, slot index, slot time |
+| `GET` | `/api/epoch-timestamps` | Epoch-to-timestamp mapping |
+| `GET` | `/api/cache/epochs-metadata` | Cached epoch end-slot mapping |
+| `POST` | `/api/cache/epochs-metadata` | Store epoch metadata |
+| `GET` | `/api/health` | Health check, uptime, version |
 
-👉 [Open an issue](https://github.com/mattkrupnik/x1-epoch-viewer/issues)
+## 🧠 Background Workers
 
-When reporting a bug, please include:
-- A clear description of the problem.
-- Steps to reproduce the issue.
-- Expected vs. actual behavior.
-- Browser and OS information.
+### Epoch Monitor
 
----
+- Polls X1 RPC for epoch transitions
+- Adjusts polling frequency based on proximity to epoch boundary
+- On new epoch, fetches and stores rewards for tracked validators
+- Retries reward sync when data is not immediately available
+
+### Validators List Sync
+
+- Syncs validator metadata from xen.network periodically
+- Powers frontend autocomplete and validator discovery
+- Uses batched database writes for efficiency
+
+## 🎛 Dashboard Configuration
+
+Frontend behavior can be tuned in `src/config/dashboard.ts`:
+
+- `SHOW_COMBINED_CHART`
+- `USE_ACCORDION`
+- `DEFAULT_ACCORDION_EXPANDED`
+- `ALLOW_REMOVE_VALIDATOR`
+- `SHOW_CHART_MODE_TOGGLE`
+- `USE_AUTOCOMPLETE`
+
+## 🗂 Project Structure
+
+```text
+x1-rewards/
+├── src/                    # Frontend app (React)
+├── server/                 # Backend API + workers (Express)
+├── nginx/nginx.conf        # Nginx template for production container
+├── docker-compose.yml      # Development PostgreSQL
+├── docker-compose.prod.yml # Full production stack
+├── Dockerfile              # Multi-stage frontend+backend build
+└── scripts/                # Deployment/bootstrap scripts
+```
+
+## 🛠 Scripts
+
+### Frontend (`package.json`)
+
+- `npm run dev` - start Vite development server
+- `npm run build` - production build
+- `npm run preview` - preview built frontend
+- `npm run lint` - run ESLint
+
+### Backend (`server/package.json`)
+
+- `npm run dev` - start backend in watch mode
+- `npm run build` - compile TypeScript
+- `npm run start` - run compiled backend
 
 ## 🤝 Contributing
 
-Contributions are welcome!
+1. Fork the repository
+2. Create a feature branch
+3. Commit your changes
+4. Open a pull request
 
-1. Fork the repository.
-2. Create a new branch (`git checkout -b feature-branch`).
-3. Make your changes and commit (`git commit -m "Added new feature"`).
-4. Push the branch (`git push origin feature-branch`).
-5. Open a Pull Request.
+## 🐛 Issues & Feedback
 
-For questions, feel free to [open an issue](https://github.com/mattkrupnik/x1-epoch-viewer/issues).
+Found a bug or have a feature request? Open an issue:
+`https://github.com/mattkrupnik/x1-epoch-viewer/issues`
+
+When reporting a bug, include:
+
+- Clear problem description
+- Steps to reproduce
+- Expected vs actual behavior
+- Browser and OS details

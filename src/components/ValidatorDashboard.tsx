@@ -23,6 +23,7 @@ import { Button } from "@/components/ui/button";
 import { CombinedRewardsChart } from "./CombinedRewardsChart";
 import { toast } from "sonner";
 import { x1Client } from "@/lib/x1-rpc";
+import { api } from "@/lib/api";
 import { ThemeSwitcher } from "./ThemeSwitcher";
 import { Badge } from "@/components/ui/badge";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
@@ -30,7 +31,6 @@ import { dashboardConfig } from "@/config/dashboard";
 import * as htmlToImage from 'html-to-image';
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandItem, CommandList, CommandInput } from "@/components/ui/command";
-import { saveValidators, searchValidators, getValidatorByVotePubkey } from "@/lib/validators-db";
 import { Progress } from "@/components/ui/progress";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { ValidatorCard } from "./ValidatorCard";
@@ -38,28 +38,6 @@ import { formatXNT, formatTimeRemaining } from "@/lib/format";
 import { ChartSettingsProvider } from "@/hooks/useChartSettings";
 import { SettingsDialog } from "./SettingsDialog";
 import { Navigation } from "./Navigation";
-
-const getEpochTimestampCache = (): Map<number, string> => {
-  try {
-    const cache = localStorage.getItem('epochTimestampCache');
-    if (cache) {
-      const parsed = JSON.parse(cache);
-      return new Map(Object.entries(parsed).map(([k, v]) => [Number(k), v as string]));
-    }
-  } catch (error) {
-    console.error('Error loading epoch timestamp cache:', error);
-  }
-  return new Map();
-};
-
-const saveEpochTimestampCache = (cache: Map<number, string>) => {
-  try {
-    const obj = Object.fromEntries(cache);
-    localStorage.setItem('epochTimestampCache', JSON.stringify(obj));
-  } catch (error) {
-    console.error('Error saving epoch timestamp cache:', error);
-  }
-};
 
 export interface EpochReward {
   epoch: number;
@@ -112,35 +90,9 @@ export const ValidatorDashboard = () => {
   const [autocompleteOpen, setAutocompleteOpen] = useState(false);
   const [suggestions, setSuggestions] = useState<ValidatorSuggestion[]>([]);
   const [loadingSuggestions, setLoadingSuggestions] = useState(false);
-  const [validatorsCacheLoaded, setValidatorsCacheLoaded] = useState(false);
   const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState(-1);
   const inputRef = useRef<HTMLInputElement>(null);
-  const [epochProgress, setEpochProgress] = useState({ slotIndex: 0, slotsInEpoch: 0, progressPercent: 0, slotTime: 0});
-
-  // Load validators cache on mount (always refresh)
-  useEffect(() => {
-    const loadValidatorsCache = async () => {
-      try {
-        const response = await fetch('https://api.xen.network/v1/x1/validators?network=mainnet&limit=5000');
-        if (response.ok) {
-          const validators = await response.json();
-          const validatorCache = validators.map((v: any) => ({
-            votePubkey: v.votePubkey,
-            nodePubkey: v.nodePubkey,
-            name: v.name,
-            iconUrl: v.iconUrl,
-          }));
-          await saveValidators(validatorCache);
-        }
-      } catch (error) {
-        console.error("Failed to load validators cache", error);
-      }
-      
-      setValidatorsCacheLoaded(true);
-    };
-    
-    loadValidatorsCache();
-  }, []);
+  const [epochProgress, setEpochProgress] = useState({ epoch: 0, slotIndex: 0, slotsInEpoch: 0, progressPercent: 0, slotTime: 0});
 
   // Load accordion state from localStorage
   useEffect(() => {
@@ -161,411 +113,169 @@ export const ValidatorDashboard = () => {
     }
   }, [openAccordions]);
 
-  // Load validator data from localStorage on mount
+  // Load validator data from API on mount
   useEffect(() => {
     const loadValidators = async () => {
-      const cachedData = localStorage.getItem("validatorCache");
-      
-      if (cachedData) {
-        try {
-          const cache = JSON.parse(cachedData) as {
-            epoch: number;
-            validators: ValidatorData[];
-            addresses: string[];
-          };
-          
-          // Fetch shared data ONCE
-          const epochInfo = await x1Client.getEpochInfo();
-          const currentEpoch = epochInfo.epoch;
-          const perfSamples = await x1Client.getRecentPerformanceSamples();
-          const sample = perfSamples[0];
-          const slotTime = sample?.samplePeriodSecs / sample?.numSlots;
+      // Load monitored addresses from localStorage
+      const savedAddresses = localStorage.getItem("monitoredAddresses");
+      // Migration: also check old validatorCache format
+      const oldCache = localStorage.getItem("validatorCache");
 
-          // Update epoch progress
+      let addresses: string[] = [];
+      if (savedAddresses) {
+        try {
+          addresses = JSON.parse(savedAddresses);
+        } catch {
+          // Ignore parse error
+        }
+      } else if (oldCache) {
+        // Migrate from old format
+        try {
+          const cache = JSON.parse(oldCache);
+          addresses = cache.addresses || [];
+          // Save in new format and clear old
+          localStorage.setItem("monitoredAddresses", JSON.stringify(addresses));
+          localStorage.removeItem("validatorCache");
+          localStorage.removeItem("epochTimestampCache");
+        } catch {
+          // Ignore parse error
+        }
+      }
+
+      if (addresses.length > 0) {
+        setMonitoredAddresses(addresses);
+
+        try {
+          // Fetch epoch progress from backend API
+          const epochInfo = await api.getEpochInfo();
           setEpochProgress({
+            epoch: epochInfo.epoch,
             slotIndex: epochInfo.slotIndex,
             slotsInEpoch: epochInfo.slotsInEpoch,
             progressPercent: (epochInfo.slotIndex / epochInfo.slotsInEpoch) * 100,
-            slotTime: slotTime
+            slotTime: epochInfo.slotTime,
           });
-          
-          setMonitoredAddresses(cache.addresses);
-          
-          const needsRefresh = cache.validators.some((validator) => 
-            !validator.epochRewards?.some((reward) => 
-              reward.selfStakeReward !== undefined && 
-              reward.date !== undefined && 
-              reward.activeStake !== undefined &&
-              reward.postBalance !== undefined
-            )
-          );
-          
-          if (needsRefresh) {
-            toast.info("Updating validator data with missing fields...");
-            
-            const voteAccounts = await x1Client.getVoteAccounts();
-            const blockProduction = null;
-            
-            for (const address of cache.addresses) {
-              await fetchValidatorData(address, cache.addresses, false, {
-                epochInfo,
-                perfSamples,
-                slotTime,
-                voteAccounts,
-                blockProduction,
-                currentEpoch
-              }, true);
-            }
-          } else if (cache.epoch === currentEpoch) {
-            // Use cached reward data, but always refresh validator status from RPC
-            setValidators(cache.validators);
-            
-            const voteAccounts = await x1Client.getVoteAccounts();
-            const allAccounts = [...voteAccounts.current, ...voteAccounts.delinquent];
 
-            setValidators((prevValidators) =>
-                prevValidators.map((validator) => {
-                  const account = allAccounts.find(
-                      (acc) => acc.votePubkey === validator.voteAddress
-                  );
-
-                  if (account) {
-                    const activatedStake = account?.activatedStake ? account?.activatedStake / 1e9 : 0;
-                    
-                    return {
-                      ...validator,
-                      status: voteAccounts.current.some(v => v.votePubkey === validator.voteAddress)
-                          ? 'active'
-                          : 'delinquent',
-                      activatedStake,
-                      commission: account.commission
-                    }
-                  }
-
-                  return validator;
-                })
-            );
-
-          } else {
-            // Epoch changed, fetch only new epochs
-            toast.info(`Epoch changed (${cache.epoch} → ${currentEpoch}), fetching new data...`);
-            
-            const voteAccounts = await x1Client.getVoteAccounts();
-            const blockProduction = null;
-            
-            for (const address of cache.addresses) {
-              await fetchValidatorData(address, cache.addresses, false, {
-                epochInfo,
-                perfSamples,
-                slotTime,
-                voteAccounts,
-                blockProduction,
-                currentEpoch
-              });
+          // Load each validator from API
+          const loadedValidators: ValidatorData[] = [];
+          for (const address of addresses) {
+            try {
+              const data = await api.getValidator(address);
+              if (data) {
+                loadedValidators.push(data);
+              }
+            } catch (error) {
+              console.error(`Failed to load validator ${address}:`, error);
             }
           }
+
+          if (loadedValidators.length > 0) {
+            setValidators(loadedValidators);
+          }
         } catch (error) {
-          console.error("Error loading validators from localStorage:", error);
-          toast.error("Error loading saved validators");
+          console.error("Error loading validators from API:", error);
+          toast.error("Error loading validators");
         }
       }
       setInitialLoading(false);
     };
-    
+
     loadValidators();
   }, []);
 
-  // Save validator data and epoch to localStorage
+  // Fetch epoch progress when validators appear but epoch data is missing
   useEffect(() => {
-    if (validators.length > 0 && monitoredAddresses.length > 0) {
-      const cache = {
-        epoch: validators[0]?.currentEpoch || 0,
-        validators: validators,
-        addresses: monitoredAddresses,
-      };
-      localStorage.setItem("validatorCache", JSON.stringify(cache));
-    } else {
-      localStorage.removeItem("validatorCache");
-    }
-  }, [validators, monitoredAddresses]);
+    if (validators.length === 0 || epochProgress.slotsInEpoch > 0) return;
 
-  const fetchValidatorData = async (
-    address: string, 
-    addressOrder?: string[], 
-    skipRewardsFetch: boolean = false,
-    sharedData?: {
-      epochInfo: any;
-      perfSamples: any;
-      slotTime: number;
-      voteAccounts: any;
-      blockProduction: any;
-      currentEpoch: number;
-    },
-    forceRefresh: boolean = false
-  ) => {
-    try {
-      // Use shared data if provided, otherwise fetch
-      let epochInfo, currentEpoch, perfSamples, slotTime, voteAccounts, blockProduction;
-      
-      if (sharedData) {
-        ({ epochInfo, currentEpoch, perfSamples, slotTime, voteAccounts, blockProduction } = sharedData);
-      } else {
-        epochInfo = await x1Client.getEpochInfo();
-        currentEpoch = epochInfo.epoch;
-        perfSamples = await x1Client.getRecentPerformanceSamples();
-        const sample = perfSamples[0];
-        slotTime = sample?.samplePeriodSecs / sample?.numSlots;
-        voteAccounts = await x1Client.getVoteAccounts();
-        
+    const fetchEpochProgress = async () => {
+      try {
+        const epochInfo = await api.getEpochInfo();
         setEpochProgress({
+          epoch: epochInfo.epoch,
           slotIndex: epochInfo.slotIndex,
           slotsInEpoch: epochInfo.slotsInEpoch,
           progressPercent: (epochInfo.slotIndex / epochInfo.slotsInEpoch) * 100,
-          slotTime: slotTime
+          slotTime: epochInfo.slotTime,
+        });
+      } catch (error) {
+        console.error("Failed to fetch epoch progress:", error);
+      }
+    };
+
+    fetchEpochProgress();
+  }, [validators.length, epochProgress.slotsInEpoch]);
+
+  // Save monitored addresses to localStorage
+  useEffect(() => {
+    if (monitoredAddresses.length > 0) {
+      localStorage.setItem("monitoredAddresses", JSON.stringify(monitoredAddresses));
+    } else {
+      localStorage.removeItem("monitoredAddresses");
+    }
+  }, [monitoredAddresses]);
+
+  // Fetch or add a validator via API
+  const fetchValidatorFromAPI = async (address: string): Promise<ValidatorData | null> => {
+    // Try to get from DB first
+    let data = await api.getValidator(address);
+    if (!data) {
+      // Not in DB yet - add it (server will fetch from RPC)
+      data = await api.addValidator(address);
+    }
+    return data;
+  };
+
+  const handleSearch = async (addressToAdd?: string) => {
+    const address = addressToAdd || voteAddress;
+    if (!address.trim()) {
+      toast.error("Please enter a validator vote address");
+      return;
+    }
+
+    if (validators.some(v => v.voteAddress === address)) {
+      toast.error("This validator has already been added");
+      return;
+    }
+
+    setLoading(true);
+    const toastId = toast.loading("Fetching validator data...");
+    try {
+      // Fetch validator data and epoch progress in parallel
+      const needsEpochProgress = epochProgress.slotsInEpoch === 0;
+      const [data, epochData] = await Promise.all([
+        fetchValidatorFromAPI(address),
+        needsEpochProgress ? api.getEpochInfo().catch(() => null) : null,
+      ]);
+
+      if (!data) {
+        toast.error("Validator not found", { id: toastId });
+        return;
+      }
+
+      // Set epoch progress before validators so it's ready when the UI renders
+      if (epochData) {
+        setEpochProgress({
+          epoch: epochData.epoch,
+          slotIndex: epochData.slotIndex,
+          slotsInEpoch: epochData.slotsInEpoch,
+          progressPercent: (epochData.slotIndex / epochData.slotsInEpoch) * 100,
+          slotTime: epochData.slotTime,
         });
       }
-      
-      const activeValidator = voteAccounts.current?.find((v: any) => v.votePubkey === address);
-      const delinquentValidator = voteAccounts.delinquent?.find((v: any) => v.votePubkey === address);
-      
-      const validatorInfo = activeValidator || delinquentValidator;
-      const status = activeValidator ? 'active' : delinquentValidator ? 'delinquent' : 'unknown';
-      const activatedStake = validatorInfo?.activatedStake ? validatorInfo.activatedStake / 1e9 : 0;
-      
-      // Fetch validator name and avatar from API
-      let validatorName: string | undefined;
-      let validatorAvatar: string | undefined;
-      try {
-        const cachedValidatorMeta = await getValidatorByVotePubkey(address);
-        if (cachedValidatorMeta) {
-          validatorName = cachedValidatorMeta.name;
-          validatorAvatar = cachedValidatorMeta.iconUrl;
-        }
-        
-        const response = await fetch(`https://api.xen.network/v1/x1/validators?network=mainnet&votePubkey=${address}`);
-        if (response.ok) {
-          const data = await response.json();
-          validatorName = validatorName || data[0]?.name || undefined;
-          validatorAvatar = validatorAvatar || data[0]?.iconUrl || undefined;
-        }
-      } catch (error) {
-        // Silently ignore errors fetching validator metadata
-        console.log("Could not fetch validator metadata");
-      }
-      
-      // Load cache from validatorCache - find existing data for this validator
-      const validatorCacheStr = localStorage.getItem("validatorCache");
-      const validatorCache = validatorCacheStr ? JSON.parse(validatorCacheStr) : null;
-      const cachedValidator = validatorCache?.validators?.find((v: ValidatorData) => v.voteAddress === address);
-      
-      // Get self-stake addresses for this validator
-      let selfStakeAddresses = cachedValidator?.selfStakeAddresses;
-      let selfStakeAmount = cachedValidator?.selfStakeAmount || 0;
-      
-      if ((!skipRewardsFetch || forceRefresh || !selfStakeAddresses) && validatorInfo?.nodePubkey) {
-        toast.info(`Fetching self-stake accounts for ${address.slice(0, 8)}...`);
-        selfStakeAddresses = await x1Client.getStakeAccountsForVote(address, validatorInfo.nodePubkey);
-        
-        // Fetch stake account balances
-        if (selfStakeAddresses.length > 0) {
-          try {
-            const accountsInfo = await x1Client.getMultipleAccounts(selfStakeAddresses);
-            selfStakeAmount = accountsInfo.value
-              .filter((acc: any) => acc !== null)
-              .reduce((sum: number, acc: any) => sum + (acc.lamports || 0), 0) / 1e9; // Convert lamports to XNT
-          } catch (error) {
-            console.error("Failed to fetch stake account balances:", error);
-          }
-        }
-      }
-      
-      // Determine which epochs to fetch
-      const epochsToFetch = 400;
-      const epochNumbers = Array.from({ length: epochsToFetch }, (_, i) => currentEpoch - i).filter(e => e >= 0);
-      
-      // Check cache for existing data
-      const epochRewards: EpochReward[] = [];
-      const epochsToQuery: number[] = [];
-      
-      if (skipRewardsFetch && cachedValidator && !forceRefresh) {
-        // Use ALL cached data without fetching anything
-        for (const epoch of epochNumbers) {
-          const cachedReward = cachedValidator.epochRewards?.find((r: EpochReward) => r.epoch === epoch);
-          if (cachedReward) {
-            epochRewards.push(cachedReward);
-          }
-        }
-      } else if (forceRefresh) {
-        // Force refresh - fetch ALL epochs
-        epochsToQuery.push(...epochNumbers);
-      } else {
-        // Normal flow - check which epochs are missing or need selfStakeReward update
-        for (const epoch of epochNumbers) {
-          const cachedReward = cachedValidator?.epochRewards?.find((r: EpochReward) => r.epoch === epoch);
-          if (cachedReward && cachedReward.selfStakeReward !== undefined) {
-            // Use cached data only if it has selfStakeReward
-            epochRewards.push(cachedReward);
-          } else {
-            // Need to fetch this epoch (missing or incomplete)
-            epochsToQuery.push(epoch);
-          }
-        }
-      }
-      
-      if (epochsToQuery.length > 0) {
-        const epochTimestampCache = getEpochTimestampCache();
-        const epochsMeta = await fetch("https://api.xen.network/v1/x1/epochs").then(res => res.json());
-        const epochSlotMap = new Map(epochsMeta.map(e => [e.epoch, e.endSlot]));
 
-        let stakeHistoryMap = new Map<number, number>();
-        if (validatorInfo?.nodePubkey) {
-          try {
-            const historyResponse = await fetch(`https://api.xen.network/v1/x1/validators/${validatorInfo.nodePubkey}/history?groupBy=epoch&network=mainnet`);
-            if (historyResponse.ok) {
-              const historyData = await historyResponse.json();
-              historyData.forEach((item: any) => {
-                if (item.epoch !== undefined && item.activatedStake !== undefined) {
-                  stakeHistoryMap.set(item.epoch, item.activatedStake / 1e9);
-                }
-              });
-            }
-          } catch (error) {
-            console.error("Failed to fetch stake history:", error);
-          }
-        }
-
-        const batchRequests = epochsToQuery.map(epoch => ({
-          method: "getInflationReward",
-          params: [[address], { epoch }],
-        }));
-
-        let selfStakeBatchRequests = [];
-        if (selfStakeAddresses?.length > 0) {
-          selfStakeBatchRequests = epochsToQuery.map(epoch => ({
-            method: "getInflationReward",
-            params: [selfStakeAddresses, { epoch }],
-          }));
-        }
-
-        const epochsNeedingTimestamp = epochsToQuery.filter(epoch => 
-          !epochTimestampCache.has(epoch) && epochSlotMap.has(epoch)
-        );
-
-        const timeRequests = epochsNeedingTimestamp.map(epoch => ({
-          method: "getBlockTime",
-          params: [epochSlotMap.get(epoch)],
-        }));
-
-        const allRequests = [...batchRequests, ...selfStakeBatchRequests, ...timeRequests];
-        const batchResults = await x1Client.batchCall(allRequests);
-
-        const validatorResults = batchResults.slice(0, epochsToQuery.length);
-        const selfStakeResults = batchResults.slice(epochsToQuery.length, 2 * epochsToQuery.length);
-        const timeResults = batchResults.slice(2 * epochsToQuery.length);
-
-        const epochTimeMap = new Map(epochTimestampCache);
-        for (let i = 0; i < timeResults.length; i++) {
-          const epoch = epochsNeedingTimestamp[i];
-          const timestamp = timeResults[i];
-          if (timestamp) {
-            const d = new Date(timestamp * 1000);
-            const datePart = d.toLocaleDateString('en-US', {
-                day: '2-digit',
-                month: 'short',
-                year: 'numeric'
-            });
-
-            const hours = String(d.getHours()).padStart(2, "0");
-            const minutes = String(d.getMinutes()).padStart(2, "0");
-
-            const timePart = `${hours}:${minutes}`;
-
-            epochTimeMap.set(epoch, `${datePart} ${timePart}`);
-          }
-        }
-
-        saveEpochTimestampCache(epochTimeMap);
-
-        for (let i = 0; i < epochsToQuery.length; i++) {
-          const epoch = epochsToQuery[i];
-          const result = validatorResults[i];
-
-          if (result?.[0]?.amount) {
-            let selfStakeReward = 0;
-            if (Array.isArray(selfStakeResults[i])) {
-              selfStakeReward = selfStakeResults[i]
-                  .filter(r => r && r.amount)
-                  .reduce((sum, r) => sum + r.amount / 1e9, 0);
-            }
-
-            const voteReward = result[0].amount / 1e9;
-            const epochActiveStake = stakeHistoryMap.get(epoch) || 0;
-            const rewardData = {
-              epoch,
-              voteReward,
-              reward: voteReward + selfStakeReward,
-              commission: result[0].commission || 10,
-              selfStakeReward,
-              date: epochTimeMap.get(epoch) || undefined,
-              activeStake: epochActiveStake,
-              postBalance: result[0].postBalance ? result[0].postBalance / 1e9 : undefined,
-            };
-
-            epochRewards.push(rewardData);
-          }
-        }
-      }
-
-
-      // Sort rewards by epoch (descending)
-      epochRewards.sort((a, b) => b.epoch - a.epoch);
-      
-      // If no rewards found during force refresh, use cached data as fallback
-      if (epochRewards.length === 0) {
-        if (forceRefresh && cachedValidator?.epochRewards) {
-          epochRewards.push(...cachedValidator.epochRewards);
-          toast.info("Using cached data - some historical data may not be available");
-        } else {
-          toast.error("No rewards found for this validator address");
-          return;
-        }
-      }
-      
-      const totalRewards = epochRewards.reduce((sum, r) => sum + r.reward, 0);
-      const averageReward = totalRewards / epochRewards.length;
-      
-      const newValidator: ValidatorData = {
-        voteAddress: address,
-        totalRewards,
-        epochCount: epochRewards.length,
-        averageReward,
-        currentEpoch,
-        activatedStake,
-        commission: validatorInfo?.commission || 10,
-        epochRewards,
-        status,
-        name: validatorName,
-        avatar: validatorAvatar,
-        selfStakeAddresses,
-        selfStakeAmount,
-      };
-
-      
       setMonitoredAddresses(prev => {
         const newAddresses = prev.includes(address) ? prev : [...prev, address];
 
         setValidators(prevValidators => {
           const filtered = prevValidators.filter(v => v.voteAddress !== address);
-          const updatedValidators = [...filtered, newValidator];
+          const updatedValidators = [...filtered, data];
 
-          // Sort according to updated monitoredAddresses
           const sorted = updatedValidators.sort((a, b) => {
             const indexA = newAddresses.indexOf(a.voteAddress);
             const indexB = newAddresses.indexOf(b.voteAddress);
             return indexA - indexB;
           });
 
-          // Set default accordion state for new validators
           const isNewValidator = !prevValidators.some(v => v.voteAddress === address);
           if (isNewValidator && dashboardConfig.DEFAULT_ACCORDION_EXPANDED) {
             const validatorIndex = sorted.findIndex(v => v.voteAddress === address);
@@ -586,31 +296,10 @@ export const ValidatorDashboard = () => {
         return newAddresses;
       });
 
-    } catch (error) {
-      console.error("Error fetching validator data:", error);
-      toast.error("Error fetching validator data");
-    }
-  };
-
-  const handleSearch = async (addressToAdd?: string) => {
-    const address = addressToAdd || voteAddress;
-    if (!address.trim()) {
-      toast.error("Please enter a validator vote address");
-      return;
-    }
-
-    if (validators.some(v => v.voteAddress === address)) {
-      toast.error("This validator has already been added");
-      return;
-    }
-
-    setLoading(true);
-    const toastId = toast.loading("Fetching validator data...");
-    try {
-      await fetchValidatorData(address);
       setVoteAddress("");
       toast.success("Validator added successfully", { id: toastId });
     } catch (error) {
+      console.error("Error fetching validator data:", error);
       toast.error("Error fetching validator data", { id: toastId });
     } finally {
       setLoading(false);
@@ -623,18 +312,16 @@ export const ValidatorDashboard = () => {
     
     try {
       // Fetch shared data ONCE
-      const epochInfo = await x1Client.getEpochInfo();
+      const epochInfo = await api.getEpochInfo();
       const currentEpoch = epochInfo.epoch;
-      const perfSamples = await x1Client.getRecentPerformanceSamples();
-      const sample = perfSamples[0];
-      const slotTime = sample?.samplePeriodSecs / sample?.numSlots;
-      
+
       // Update epoch progress
       setEpochProgress({
+        epoch: epochInfo.epoch,
         slotIndex: epochInfo.slotIndex,
         slotsInEpoch: epochInfo.slotsInEpoch,
         progressPercent: (epochInfo.slotIndex / epochInfo.slotsInEpoch) * 100,
-        slotTime: slotTime
+        slotTime: epochInfo.slotTime,
       });
       
       const blockProduction = await x1Client.getBlockProduction(currentEpoch);
@@ -668,14 +355,19 @@ export const ValidatorDashboard = () => {
     }
   }, [validators, initialLoading]);
 
-  const removeValidator = (voteAddress: string) => {
+  const removeValidator = async (voteAddress: string) => {
     const validatorIndex = validators.findIndex(v => v.voteAddress === voteAddress);
     if (validatorIndex !== -1) {
-      // Remove from accordion state
       setOpenAccordions(prev => prev.filter(v => v !== `validator-${validatorIndex}`));
     }
     setValidators(validators.filter(v => v.voteAddress !== voteAddress));
     setMonitoredAddresses(prev => prev.filter(addr => addr !== voteAddress));
+
+    try {
+      await api.deleteValidator(voteAddress);
+    } catch (error) {
+      console.error("Failed to delete validator from server:", error);
+    }
     toast.success("Validator removed");
   };
 
@@ -686,17 +378,28 @@ export const ValidatorDashboard = () => {
     }
 
     setRefreshing(true);
-    const toastId = toast.loading("Refreshing validator data...");
-    
+    const toastId = toast.loading("Syncing validator data...");
+
     try {
-      // Force refresh - fetch ALL data from scratch
+      const refreshedValidators: ValidatorData[] = [];
       for (const address of monitoredAddresses) {
-        await fetchValidatorData(address, monitoredAddresses, false, undefined, true);
+        try {
+          const data = await api.resyncValidator(address);
+          if (data) {
+            refreshedValidators.push(data);
+          }
+        } catch (error) {
+          console.error(`Failed to resync validator ${address}:`, error);
+        }
       }
-      
-      toast.success("All validators refreshed successfully", { id: toastId });
+
+      if (refreshedValidators.length > 0) {
+        setValidators(refreshedValidators);
+      }
+
+      toast.success("All validators synced successfully", { id: toastId });
     } catch (error) {
-      toast.error("Error refreshing validators", { id: toastId });
+      toast.error("Error syncing validators", { id: toastId });
     } finally {
       setRefreshing(false);
     }
@@ -735,21 +438,17 @@ export const ValidatorDashboard = () => {
     }
   };
 
-  // Search validator suggestions from IndexedDB
+  // Search validator suggestions from API
   const fetchValidatorSuggestions = async (query: string) => {
-    if (!dashboardConfig.USE_AUTOCOMPLETE || query.length < 3) {
+    if (!dashboardConfig.USE_AUTOCOMPLETE || query.length < 2) {
       setSuggestions([]);
       setAutocompleteOpen(false);
       return;
     }
 
-    if (!validatorsCacheLoaded) {
-      return;
-    }
-
     setLoadingSuggestions(true);
     try {
-      const results = await searchValidators(query);
+      const results = await api.searchValidators(query);
       setSuggestions(results);
       setAutocompleteOpen(results.length > 0);
     } catch (error) {
@@ -1196,7 +895,7 @@ export const ValidatorDashboard = () => {
                   </TooltipProvider>
                 </CardHeader>
                 <CardContent>
-                  <p className="text-3xl font-bold">{validators[0]?.currentEpoch || 0}</p>
+                  <p className="text-3xl font-bold">{epochProgress.epoch || validators[0]?.currentEpoch || 0}</p>
                   <div className="mt-1 space-y-2">
                     <div className="space-y-1">
                       <div className="flex items-center justify-between text-xs">
