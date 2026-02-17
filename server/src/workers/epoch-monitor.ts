@@ -152,6 +152,42 @@ async function updateValidatorsForNewEpoch(newEpoch: number, currentEpoch: numbe
   }
   await Promise.all(executing);
 
+  // Fetch fresh self_stake_amount for all validators (batched, before transaction)
+  const selfStakeAmountMap = new Map<string, number>();
+  const validatorsWithStake = validators.filter(v => v.self_stake_addresses?.length > 0);
+
+  if (validatorsWithStake.length > 0) {
+    const addrToVote = new Map<string, string>();
+    const allStakeAddresses: string[] = [];
+    for (const v of validatorsWithStake) {
+      for (const addr of v.self_stake_addresses) {
+        addrToVote.set(addr, v.vote_address);
+        allStakeAddresses.push(addr);
+      }
+    }
+
+    try {
+      const CHUNK_SIZE = 100;
+      const allResults: any[] = [];
+      for (let i = 0; i < allStakeAddresses.length; i += CHUNK_SIZE) {
+        const chunk = allStakeAddresses.slice(i, i + CHUNK_SIZE);
+        const info = await x1Client.getMultipleAccounts(chunk);
+        allResults.push(...info.value);
+      }
+
+      allResults.forEach((acc: any, idx: number) => {
+        if (acc === null) return;
+        const voteAddr = addrToVote.get(allStakeAddresses[idx])!;
+        selfStakeAmountMap.set(voteAddr, (selfStakeAmountMap.get(voteAddr) || 0) + (acc.lamports || 0));
+      });
+      for (const [voteAddr, lamports] of selfStakeAmountMap) {
+        selfStakeAmountMap.set(voteAddr, lamports / 1e9);
+      }
+    } catch (stakeErr) {
+      console.error('[epoch-monitor] Failed to refresh self_stake amounts:', (stakeErr as Error).message);
+    }
+  }
+
   // Process results and save to DB
   const client = await pool.connect();
   try {
@@ -171,16 +207,30 @@ async function updateValidatorsForNewEpoch(newEpoch: number, currentEpoch: numbe
           ? 'active'
           : 'delinquent';
 
-        await client.query(
-          `UPDATE validators SET
-            status = $1,
-            activated_stake = $2,
-            commission = $3,
-            current_epoch = $4,
-            updated_at = NOW()
-           WHERE vote_address = $5`,
-          [newStatus, newActivatedStake, account.commission, currentEpoch, v.vote_address]
-        );
+        if (selfStakeAmountMap.has(v.vote_address)) {
+          await client.query(
+            `UPDATE validators SET
+              status = $1,
+              activated_stake = $2,
+              commission = $3,
+              current_epoch = $4,
+              self_stake_amount = $5,
+              updated_at = NOW()
+             WHERE vote_address = $6`,
+            [newStatus, newActivatedStake, account.commission, currentEpoch, selfStakeAmountMap.get(v.vote_address)!, v.vote_address]
+          );
+        } else {
+          await client.query(
+            `UPDATE validators SET
+              status = $1,
+              activated_stake = $2,
+              commission = $3,
+              current_epoch = $4,
+              updated_at = NOW()
+             WHERE vote_address = $5`,
+            [newStatus, newActivatedStake, account.commission, currentEpoch, v.vote_address]
+          );
+        }
       }
 
       // Process vote reward
