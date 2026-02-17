@@ -1,6 +1,6 @@
 import { RewardsChart } from "./RewardsChart";
 import { EpochRewardsTable } from "./EpochRewardsTable";
-import { EpochReward } from "./ValidatorDashboard";
+import { EpochReward } from "@/types/validator";
 
 interface ValidatorDetailsProps {
   voteAddress: string;

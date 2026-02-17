@@ -15,7 +15,7 @@ import {
   Check,
   CircleAlert
 } from "lucide-react";
-import { Footer } from "./Footer";
+import { Footer } from "@/components/shared/Footer";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -24,7 +24,7 @@ import { CombinedRewardsChart } from "./CombinedRewardsChart";
 import { toast } from "sonner";
 import { x1Client } from "@/lib/x1-rpc";
 import { api } from "@/lib/api";
-import { ThemeSwitcher } from "./ThemeSwitcher";
+import { ThemeSwitcher } from "@/components/shared/ThemeSwitcher";
 import { Badge } from "@/components/ui/badge";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { dashboardConfig } from "@/config/dashboard";
@@ -36,19 +36,10 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { ValidatorCard } from "./ValidatorCard";
 import { formatXNT, formatTimeRemaining } from "@/lib/format";
 import { ChartSettingsProvider } from "@/hooks/useChartSettings";
-import { SettingsDialog } from "./SettingsDialog";
-import { Navigation } from "./Navigation";
+import { SettingsDialog } from "@/components/shared/SettingsDialog";
+import { Navigation } from "@/components/shared/Navigation";
 
-export interface EpochReward {
-  epoch: number;
-  voteReward: number;
-  reward: number;
-  commission: number;
-  selfStakeReward?: number;
-  date?: string;
-  activeStake?: number;
-  postBalance?: number;
-}
+export type { EpochReward } from "@/types/validator";
 
 interface ValidatorData {
   voteAddress: string;
@@ -531,8 +522,8 @@ export const ValidatorDashboard = () => {
 
   return (
     <ChartSettingsProvider>
-    <div className="min-h-screen bg-background flex flex-col">
-      <header className="sticky-disabled top-0 z-10 border-b bg-card">
+    <div className="min-h-screen flex flex-col">
+      <header className="sticky-disabled top-0 z-10 border-b bg-card/70 backdrop-blur-xl">
         <div className="container mx-auto px-4 py-3 sm:py-4">
           <div className="flex items-center justify-between gap-3">
             <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
@@ -566,7 +557,7 @@ export const ValidatorDashboard = () => {
               {/*  </svg>*/}
               {/*</a>*/}
               <Navigation showNavigation={true} />
-              {validators.length > 0 && (
+              {monitoredAddresses.length > 0 && (
                   <Button
                       variant="outline"
                       size="icon"
@@ -586,7 +577,7 @@ export const ValidatorDashboard = () => {
 
       <main className="container mx-auto px-4 py-6 sm:py-8 space-y-6">
         {/* Search Section */}
-        <Card className="border-2">
+        <Card>
           <CardHeader>
             <CardTitle>Add Validator</CardTitle>
             <CardDescription>
@@ -730,12 +721,14 @@ export const ValidatorDashboard = () => {
             {/* Combined Stats */}
             <div className="grid gap-4 md:grid-cols-4">
               <div className="relative">
-                <Card className="border-2" id='total-rewards'>
+                <Card id='total-rewards'>
                   <CardHeader className="pb-3">
                     <TooltipProvider delayDuration={0}>
                       <Tooltip>
                           <div className="flex items-center gap-2 cursor-help">
-                            <Coins className="h-5 w-5 text-primary"/>
+                            <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center">
+                              <Coins className="h-4 w-4 text-primary"/>
+                            </div>
                             <CardTitle className="text-base">Total Rewards</CardTitle>
                             <TooltipTrigger asChild>
                               <CircleAlert className="h-[.8rem] w-[.8rem] text-muted-foreground"/>
@@ -767,10 +760,12 @@ export const ValidatorDashboard = () => {
                   </div>
               </div>
 
-              <Card className="border-2">
+              <Card>
                 <CardHeader className="pb-3">
                   <div className="flex items-center gap-2">
-                    <TrendingUp className="h-5 w-5 text-success"/>
+                    <div className="h-8 w-8 rounded-lg bg-success/10 flex items-center justify-center">
+                      <TrendingUp className="h-4 w-4 text-success"/>
+                    </div>
                     <CardTitle className="text-base">Average Reward</CardTitle>
                   </div>
                 </CardHeader>
@@ -780,12 +775,14 @@ export const ValidatorDashboard = () => {
                 </CardContent>
               </Card>
 
-              <Card className="border-2">
+              <Card>
                 <CardHeader className="pb-3">
                   <TooltipProvider delayDuration={0}>
                     <Tooltip>
                       <div className="flex items-center gap-2 cursor-help">
-                        <Coins className="h-5 w-5 text-accent"/>
+                        <div className="h-8 w-8 rounded-lg bg-accent/10 flex items-center justify-center">
+                          <Coins className="h-4 w-4 text-accent"/>
+                        </div>
                         <CardTitle className="text-base">Last Epoch</CardTitle>
                         <TooltipTrigger asChild>
                           <CircleAlert className="h-[.8rem] w-[.8rem] text-muted-foreground"/>
@@ -861,12 +858,14 @@ export const ValidatorDashboard = () => {
                 </CardContent>
               </Card>
 
-              <Card className="border-2 relative">
+              <Card className="relative">
                 <CardHeader className="pb-3">
                   <TooltipProvider delayDuration={0}>
                     <Tooltip>
                       <div className="flex items-center gap-2 cursor-help">
-                        <Calendar className="h-5 w-5 text-primary" />
+                        <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center">
+                          <Calendar className="h-4 w-4 text-primary" />
+                        </div>
                         <CardTitle className="text-base">Current Epoch</CardTitle>
                         <TooltipTrigger asChild>
                           <CircleAlert className="h-[.8rem] w-[.8rem] text-muted-foreground"/>

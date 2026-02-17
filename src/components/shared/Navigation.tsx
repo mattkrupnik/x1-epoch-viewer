@@ -38,7 +38,7 @@ export const Navigation = (
             className={cn(
               "flex items-center gap-1.5 px-3 py-1.5 sm:px-4 sm:py-2 rounded-lg text-xs sm:text-sm font-medium transition-all duration-200",
               isActive
-                ? "bg-primary text-primary-foreground shadow-md"
+                ? "bg-gradient-to-r from-primary to-blue-500 text-primary-foreground shadow-md"
                 : "bg-secondary/50 text-muted-foreground hover:bg-secondary hover:text-foreground"
             )}
           >

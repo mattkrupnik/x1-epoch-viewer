@@ -4,13 +4,13 @@ import { Wallet, ArrowLeft, RefreshCw, Copy, Check } from "lucide-react";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { SettingsDialog } from "@/components/SettingsDialog";
-import { Navigation } from "@/components/Navigation";
-import { WalletTokens } from "@/components/WalletTokens";
+import { SettingsDialog } from "@/components/shared/SettingsDialog";
+import { Navigation } from "@/components/shared/Navigation";
+import { WalletTokens } from "@/components/portfolio/WalletTokens";
 import { getMultipleWalletBalances, WalletBalance } from "@/lib/wallet-rpc";
 import { formatXNT } from "@/lib/format";
 import { toast } from "sonner";
-import { Footer } from "@/components/Footer";
+import { Footer } from "@/components/shared/Footer";
 
 const Address = () => {
   const { address } = useParams<{ address: string }>();
@@ -56,8 +56,8 @@ const Address = () => {
   };
 
   return (
-    <div className="min-h-screen bg-background flex flex-col">
-      <header className="border-b bg-card">
+    <div className="min-h-screen flex flex-col">
+      <header className="border-b bg-card/70 backdrop-blur-xl">
         <div className="container mx-auto px-4 py-3 sm:py-4">
           <div className="flex items-center justify-between gap-3">
             <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
