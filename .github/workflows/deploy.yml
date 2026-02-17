@@ -1,4 +1,4 @@
-name: Deploy to VPS
+name: Deploy – Production
 
 on:
   workflow_dispatch:
@@ -15,8 +15,8 @@ jobs:
           key: ${{ secrets.VPS_SSH_KEY }}
           script: |
             cd ./x1rewards.xyz
-            git fetch origin main
-            git reset --hard origin/main
+            git fetch origin master
+            git reset --hard origin/master
             docker compose -f docker-compose.prod.yml build --no-cache server frontend-init
             docker compose -f docker-compose.prod.yml run --rm frontend-init
             docker compose -f docker-compose.prod.yml up -d server postgres nginx
