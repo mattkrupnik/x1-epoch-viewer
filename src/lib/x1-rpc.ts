@@ -1,5 +1,5 @@
 // X1 Network RPC utilities
-const RPC_URL = "https://rpc.mainnet.x1.xyz";
+const RPC_URL = import.meta.env.VITE_X1_RPC_URL || "https://rpc.mainnet.x1.xyz";
 
 export interface EpochInfo {
   epoch: number;
