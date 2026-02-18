@@ -3,7 +3,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
 import Index from "./pages/Index";
 import Portfolio from "./pages/Portfolio";
 import Address from "./pages/Address";
@@ -11,6 +11,20 @@ import Validator from "./pages/Validator";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
+
+declare const gtag: (...args: unknown[]) => void;
+
+function RouteTracker() {
+  const location = useLocation();
+  useEffect(() => {
+    if (typeof gtag !== "undefined") {
+      gtag("event", "page_view", {
+        page_path: location.pathname + location.search,
+      });
+    }
+  }, [location]);
+  return null;
+}
 
 const App = () => {
   useEffect(() => {
@@ -25,6 +39,7 @@ const App = () => {
         <Toaster />
         <Sonner />
         <BrowserRouter>
+          <RouteTracker />
           <Routes>
             <Route path="/" element={<Index />} />
             <Route path="/portfolio" element={<Portfolio />} />
