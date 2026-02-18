@@ -3,7 +3,7 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/
 import { ValidatorHeader } from "./ValidatorHeader";
 import { ValidatorStats } from "./ValidatorStats";
 import { ValidatorDetails } from "./ValidatorDetails";
-import { EpochReward } from "./ValidatorDashboard";
+import { EpochReward } from "@/types/validator";
 
 interface ValidatorCardProps {
   voteAddress: string;

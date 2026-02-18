@@ -42,3 +42,7 @@ export const useChartSettings = () => {
   }
   return context;
 };
+
+export const useChartSettingsSafe = () => {
+  return useContext(ChartSettingsContext);
+};

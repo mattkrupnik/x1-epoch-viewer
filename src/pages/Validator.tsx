@@ -3,13 +3,13 @@ import { useEffect, useState } from "react";
 import { ShieldCheck, ArrowLeft, RefreshCw, Copy, Check } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Navigation } from "@/components/Navigation";
-import { ValidatorCard } from "@/components/ValidatorCard";
+import { Navigation } from "@/components/shared/Navigation";
+import { ValidatorCard } from "@/components/validator/ValidatorCard";
 import { x1Client } from "@/lib/x1-rpc";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
 import { ChartSettingsProvider } from "@/hooks/useChartSettings";
-import { EpochReward } from "@/components/ValidatorDashboard";
+import { EpochReward } from "@/types/validator";
 
 interface ValidatorData {
   voteAddress: string;
@@ -108,8 +108,8 @@ const Validator = () => {
 
   return (
     <ChartSettingsProvider>
-      <div className="min-h-screen bg-background flex flex-col">
-        <header className="border-b bg-card">
+      <div className="min-h-screen flex flex-col">
+        <header className="border-b bg-card/70 backdrop-blur-xl">
           <div className="container mx-auto px-4 py-3 sm:py-4">
             <div className="flex items-center justify-between gap-3">
               <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">

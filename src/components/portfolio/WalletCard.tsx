@@ -4,6 +4,7 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/
 import { WalletHeader } from "./WalletHeader";
 import { WalletTokens } from "./WalletTokens";
 import { WalletBalance } from "@/lib/wallet-rpc";
+import { toast } from "sonner";
 
 interface WalletCardProps {
   wallet: WalletBalance;
@@ -12,8 +13,8 @@ interface WalletCardProps {
   accordionValue?: string;
 }
 
-export const WalletCard = ({ 
-  wallet, 
+export const WalletCard = ({
+  wallet,
   onRemove,
   useAccordion = false,
   accordionValue
@@ -21,17 +22,27 @@ export const WalletCard = ({
   const [copied, setCopied] = useState(false);
 
   const copyAddress = async () => {
-    await navigator.clipboard.writeText(wallet.address);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    try {
+      await navigator.clipboard.writeText(wallet.address);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {}
+  };
+
+  const shareWallet = () => {
+    const url = `${window.location.origin}/portfolio/${wallet.address}`;
+    navigator.clipboard.writeText(url);
+    toast.success("Wallet link copied to clipboard");
   };
 
   const headerProps = {
     address: wallet.address,
     solBalance: wallet.solBalance,
     tokenCount: wallet.tokens.length,
+    accountType: wallet.accountType,
     isCopied: copied,
     onCopy: copyAddress,
+    onShare: shareWallet,
     onRemove
   };
 
@@ -48,7 +59,7 @@ export const WalletCard = ({
           </CardHeader>
           <AccordionContent>
             <CardContent className="pt-3">
-              <WalletTokens tokens={wallet.tokens} solBalance={wallet.solBalance} />
+              <WalletTokens tokens={wallet.tokens} solBalance={wallet.solBalance} nativeLogo={wallet.nativeLogo} nativePrice={wallet.nativePrice} />
             </CardContent>
           </AccordionContent>
         </Card>
@@ -62,7 +73,7 @@ export const WalletCard = ({
         <WalletHeader {...headerProps} />
       </CardHeader>
       <CardContent>
-        <WalletTokens tokens={wallet.tokens} solBalance={wallet.solBalance} />
+        <WalletTokens tokens={wallet.tokens} solBalance={wallet.solBalance} nativeLogo={wallet.nativeLogo} nativePrice={wallet.nativePrice} />
       </CardContent>
     </Card>
   );

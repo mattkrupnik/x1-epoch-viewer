@@ -49,6 +49,60 @@ app.get('/api/epoch-info', async (_req, res) => {
   }
 });
 
+// RPC proxy - forwards browser RPC calls to avoid CORS issues
+app.post('/api/rpc', async (req, res) => {
+  try {
+    const response = await fetch(config.x1RpcUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(req.body),
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!response.ok) {
+      return res.status(response.status).json({ error: 'RPC error' });
+    }
+    const data = await response.json();
+    res.json(data);
+  } catch (error) {
+    console.error('RPC proxy error:', error);
+    res.status(502).json({ error: 'RPC proxy failed' });
+  }
+});
+
+// xDEX wallet tokens — cached 60s per address, max 200 entries
+const walletTokensCache = new Map<string, { data: unknown; ts: number }>();
+const WALLET_CACHE_TTL = 60_000;
+const WALLET_CACHE_MAX = 200;
+const BASE58_RE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+
+app.get('/api/wallet-tokens', async (req, res) => {
+  const address = req.query.address as string;
+  if (!address) return res.status(400).json({ error: 'Missing address' });
+  if (!BASE58_RE.test(address)) return res.status(400).json({ error: 'Invalid address' });
+
+  const cached = walletTokensCache.get(address);
+  if (cached && Date.now() - cached.ts < WALLET_CACHE_TTL) {
+    return res.json(cached.data);
+  }
+
+  try {
+    const url = `https://api.xdex.xyz/api/xendex/wallet/tokens?wallet_address=${encodeURIComponent(address)}&network=X1%20Mainnet&price=true&24h_change=true`;
+    const response = await fetch(url, { signal: AbortSignal.timeout(10000) });
+    if (!response.ok) return res.status(response.status).json({ error: 'xDEX API error' });
+    const json = await response.json();
+
+    // Evict oldest entry when cache is full
+    if (walletTokensCache.size >= WALLET_CACHE_MAX) {
+      walletTokensCache.delete(walletTokensCache.keys().next().value!);
+    }
+    walletTokensCache.set(address, { data: json, ts: Date.now() });
+    res.json(json);
+  } catch (error) {
+    console.error('Failed to fetch xDEX wallet tokens:', error);
+    res.status(502).json({ error: 'xDEX unavailable' });
+  }
+});
+
 // Health check
 app.get('/api/health', (_req, res) => {
   res.json({
