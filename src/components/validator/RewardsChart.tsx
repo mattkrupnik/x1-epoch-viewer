@@ -10,7 +10,7 @@ import {
     ResponsiveContainer,
     Legend
 } from "recharts";
-import { EpochReward } from "./ValidatorDashboard";
+import { EpochReward } from "@/types/validator";
 import {formatXNT} from "@/lib/format.ts";
 import { useChartSettings } from "@/hooks/useChartSettings";
 

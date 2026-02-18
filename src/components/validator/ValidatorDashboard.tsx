@@ -15,7 +15,7 @@ import {
   Check,
   CircleAlert
 } from "lucide-react";
-import authorAvatar from "@/assets/author-avatar.jpg";
+import { Footer } from "@/components/shared/Footer";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -24,7 +24,7 @@ import { CombinedRewardsChart } from "./CombinedRewardsChart";
 import { toast } from "sonner";
 import { x1Client } from "@/lib/x1-rpc";
 import { api } from "@/lib/api";
-import { ThemeSwitcher } from "./ThemeSwitcher";
+import { ThemeSwitcher } from "@/components/shared/ThemeSwitcher";
 import { Badge } from "@/components/ui/badge";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { dashboardConfig } from "@/config/dashboard";
@@ -36,19 +36,10 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { ValidatorCard } from "./ValidatorCard";
 import { formatXNT, formatTimeRemaining } from "@/lib/format";
 import { ChartSettingsProvider } from "@/hooks/useChartSettings";
-import { SettingsDialog } from "./SettingsDialog";
-import { Navigation } from "./Navigation";
+import { SettingsDialog } from "@/components/shared/SettingsDialog";
+import { Navigation } from "@/components/shared/Navigation";
 
-export interface EpochReward {
-  epoch: number;
-  voteReward: number;
-  reward: number;
-  commission: number;
-  selfStakeReward?: number;
-  date?: string;
-  activeStake?: number;
-  postBalance?: number;
-}
+export type { EpochReward } from "@/types/validator";
 
 interface ValidatorData {
   voteAddress: string;
@@ -531,8 +522,8 @@ export const ValidatorDashboard = () => {
 
   return (
     <ChartSettingsProvider>
-    <div className="min-h-screen bg-background flex flex-col">
-      <header className="sticky-disabled top-0 z-10 border-b bg-card">
+    <div className="min-h-screen flex flex-col">
+      <header className="sticky-disabled top-0 z-10 border-b bg-card/70 backdrop-blur-xl">
         <div className="container mx-auto px-4 py-3 sm:py-4">
           <div className="flex items-center justify-between gap-3">
             <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
@@ -565,8 +556,8 @@ export const ValidatorDashboard = () => {
               {/*    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />*/}
               {/*  </svg>*/}
               {/*</a>*/}
-              <Navigation />
-              {validators.length > 0 && (
+              <Navigation showNavigation={true} />
+              {monitoredAddresses.length > 0 && (
                   <Button
                       variant="outline"
                       size="icon"
@@ -586,7 +577,7 @@ export const ValidatorDashboard = () => {
 
       <main className="container mx-auto px-4 py-6 sm:py-8 space-y-6">
         {/* Search Section */}
-        <Card className="border-2">
+        <Card>
           <CardHeader>
             <CardTitle>Add Validator</CardTitle>
             <CardDescription>
@@ -730,12 +721,14 @@ export const ValidatorDashboard = () => {
             {/* Combined Stats */}
             <div className="grid gap-4 md:grid-cols-4">
               <div className="relative">
-                <Card className="border-2" id='total-rewards'>
+                <Card id='total-rewards'>
                   <CardHeader className="pb-3">
                     <TooltipProvider delayDuration={0}>
                       <Tooltip>
                           <div className="flex items-center gap-2 cursor-help">
-                            <Coins className="h-5 w-5 text-primary"/>
+                            <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center">
+                              <Coins className="h-4 w-4 text-primary"/>
+                            </div>
                             <CardTitle className="text-base">Total Rewards</CardTitle>
                             <TooltipTrigger asChild>
                               <CircleAlert className="h-[.8rem] w-[.8rem] text-muted-foreground"/>
@@ -767,10 +760,12 @@ export const ValidatorDashboard = () => {
                   </div>
               </div>
 
-              <Card className="border-2">
+              <Card>
                 <CardHeader className="pb-3">
                   <div className="flex items-center gap-2">
-                    <TrendingUp className="h-5 w-5 text-success"/>
+                    <div className="h-8 w-8 rounded-lg bg-success/10 flex items-center justify-center">
+                      <TrendingUp className="h-4 w-4 text-success"/>
+                    </div>
                     <CardTitle className="text-base">Average Reward</CardTitle>
                   </div>
                 </CardHeader>
@@ -780,12 +775,14 @@ export const ValidatorDashboard = () => {
                 </CardContent>
               </Card>
 
-              <Card className="border-2">
+              <Card>
                 <CardHeader className="pb-3">
                   <TooltipProvider delayDuration={0}>
                     <Tooltip>
                       <div className="flex items-center gap-2 cursor-help">
-                        <Coins className="h-5 w-5 text-accent"/>
+                        <div className="h-8 w-8 rounded-lg bg-accent/10 flex items-center justify-center">
+                          <Coins className="h-4 w-4 text-accent"/>
+                        </div>
                         <CardTitle className="text-base">Last Epoch</CardTitle>
                         <TooltipTrigger asChild>
                           <CircleAlert className="h-[.8rem] w-[.8rem] text-muted-foreground"/>
@@ -861,12 +858,14 @@ export const ValidatorDashboard = () => {
                 </CardContent>
               </Card>
 
-              <Card className="border-2 relative">
+              <Card className="relative">
                 <CardHeader className="pb-3">
                   <TooltipProvider delayDuration={0}>
                     <Tooltip>
                       <div className="flex items-center gap-2 cursor-help">
-                        <Calendar className="h-5 w-5 text-primary" />
+                        <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center">
+                          <Calendar className="h-4 w-4 text-primary" />
+                        </div>
                         <CardTitle className="text-base">Current Epoch</CardTitle>
                         <TooltipTrigger asChild>
                           <CircleAlert className="h-[.8rem] w-[.8rem] text-muted-foreground"/>
@@ -991,38 +990,7 @@ export const ValidatorDashboard = () => {
         )}
       </main>
 
-      {/* Footer */}
-      <footer className="border-t bg-card mt-auto">
-        <div className="container mx-auto px-4 py-6 flex  text-xs sm:text-sm justify-center flex-wrap gap-4 lg:justify-between">
-          <div className="flex items-center justify-center gap-2 text-muted-foreground flex-wrap"><a
-              href="https://x.com/JustDeMatt"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-2 hover:text-foreground transition-colors"
-          >
-            <img
-                src={authorAvatar}
-                alt="JustDeMatt"
-                className="h-6 w-6 rounded-full"
-            />
-          </a> Support my work with XNT:
-            <span onCopy={() => {
-                  if (typeof window !== "undefined" && (window as any).gtag) {
-                    (window as any).gtag("event", "copy_support_wallet_address", {
-                      event_category: "engagement",
-                      event_label: "footer__copy_support_wallet_address",
-                      value: "DrLEY6BaUPWPbZ8qu3mR7wDGtgZzuR4hSJRNmSPq3Zpu",
-                    });
-                  }
-                }}
-                className="cursor-text select-text underline decoration-dotted"
-                title="Copy or select to copy">DrLEY6BaUPWPbZ8qu3mR7wDGtgZzuR4hSJRNmSPq3Zpu</span>
-          </div>
-          <div className="flex items-center justify-center gap-2 text-muted-foreground">
-            <p>Made with <span className="text-red-500">❤</span> in Poland</p>
-          </div>
-        </div>
-      </footer>
+      <Footer />
     </div>
     </ChartSettingsProvider>
   );

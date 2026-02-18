@@ -1,7 +1,6 @@
 import { Link, useLocation } from "react-router-dom";
 import { Coins, Wallet } from "lucide-react";
 import { cn } from "@/lib/utils";
-import {WalletBalance} from "@/lib/wallet-rpc.ts";
 
 interface NavigationProps {
   showNavigation?: boolean;
@@ -15,8 +14,8 @@ export const Navigation = (
   const location = useLocation();
   
   const links = [
-    { to: "/", label: "Validators", icon: Coins }
-    // { to: "/portfolio", label: "Portfolio", icon: Wallet },
+    { to: "/", label: "Validators", icon: Coins },
+    { to: "/portfolio", label: "Portfolio", icon: Wallet },
   ];
 
   if (!showNavigation){
@@ -26,7 +25,10 @@ export const Navigation = (
   return (
     <nav className="flex items-center gap-1 sm:gap-2">
       {links.map((link) => {
-        const isActive = location.pathname === link.to;
+        const isActive =
+          link.to === "/"
+            ? location.pathname === "/"
+            : location.pathname === link.to || location.pathname.startsWith(`${link.to}/`);
         const Icon = link.icon;
         
         return (
@@ -36,7 +38,7 @@ export const Navigation = (
             className={cn(
               "flex items-center gap-1.5 px-3 py-1.5 sm:px-4 sm:py-2 rounded-lg text-xs sm:text-sm font-medium transition-all duration-200",
               isActive
-                ? "bg-primary text-primary-foreground shadow-md"
+                ? "bg-gradient-to-r from-primary to-blue-500 text-primary-foreground shadow-md"
                 : "bg-secondary/50 text-muted-foreground hover:bg-secondary hover:text-foreground"
             )}
           >

@@ -3,12 +3,14 @@ import { useEffect, useState } from "react";
 import { Wallet, ArrowLeft, RefreshCw, Copy, Check } from "lucide-react";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { ThemeSwitcher } from "@/components/ThemeSwitcher";
-import { Navigation } from "@/components/Navigation";
-import { WalletTokens } from "@/components/WalletTokens";
+import { Badge } from "@/components/ui/badge";
+import { SettingsDialog } from "@/components/shared/SettingsDialog";
+import { Navigation } from "@/components/shared/Navigation";
+import { WalletTokens } from "@/components/portfolio/WalletTokens";
 import { getMultipleWalletBalances, WalletBalance } from "@/lib/wallet-rpc";
 import { formatXNT } from "@/lib/format";
 import { toast } from "sonner";
+import { Footer } from "@/components/shared/Footer";
 
 const Address = () => {
   const { address } = useParams<{ address: string }>();
@@ -54,8 +56,8 @@ const Address = () => {
   };
 
   return (
-    <div className="min-h-screen bg-background flex flex-col">
-      <header className="border-b bg-card">
+    <div className="min-h-screen flex flex-col">
+      <header className="border-b bg-card/70 backdrop-blur-xl">
         <div className="container mx-auto px-4 py-3 sm:py-4">
           <div className="flex items-center justify-between gap-3">
             <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
@@ -75,7 +77,7 @@ const Address = () => {
                   <ArrowLeft className="h-4 w-4" />
                 </Button>
               </Link>
-              <Navigation />
+              <Navigation showNavigation={true} />
               <Button
                 variant="outline"
                 size="icon"
@@ -86,7 +88,7 @@ const Address = () => {
               >
                 <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
               </Button>
-              <ThemeSwitcher />
+              <SettingsDialog page="portfolio" />
             </div>
           </div>
         </div>
@@ -121,7 +123,10 @@ const Address = () => {
                       )}
                     </Button>
                   </div>
-                  <div className="flex items-center gap-4 text-sm">
+                  <div className="flex items-center gap-4 text-sm flex-wrap">
+                    <Badge variant={wallet.accountType} className="text-xs capitalize">
+                      {wallet.accountType}
+                    </Badge>
                     <div>
                       <span className="text-muted-foreground">Balance: </span>
                       <span className="font-medium">{formatXNT(wallet.solBalance)} XNT</span>
@@ -130,6 +135,20 @@ const Address = () => {
                       <span className="text-muted-foreground">Tokens: </span>
                       <span className="font-medium">{wallet.tokens.length}</span>
                     </div>
+                    {(() => {
+                      const tokenVal = wallet.tokens.reduce((s, t) => s + (t.valueUsd ?? 0), 0);
+                      const xntVal = wallet.nativePrice != null ? wallet.solBalance * wallet.nativePrice : 0;
+                      const total = tokenVal + xntVal;
+                      if (!isFinite(total) || total <= 0) return null;
+                      return (
+                        <div>
+                          <span className="text-muted-foreground">Total Value: </span>
+                          <span className="font-semibold">
+                            ${total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </span>
+                        </div>
+                      );
+                    })()}
                   </div>
                 </div>
               </CardHeader>
@@ -141,7 +160,12 @@ const Address = () => {
                 <h3 className="text-lg font-semibold">Token Holdings</h3>
               </CardHeader>
               <CardContent>
-                <WalletTokens tokens={wallet.tokens} />
+                <WalletTokens
+                  tokens={wallet.tokens}
+                  solBalance={wallet.solBalance}
+                  nativeLogo={wallet.nativeLogo}
+                  nativePrice={wallet.nativePrice}
+                />
               </CardContent>
             </Card>
           </>
@@ -158,11 +182,7 @@ const Address = () => {
         )}
       </main>
 
-      <footer className="border-t bg-card mt-auto">
-        <div className="container mx-auto px-4 py-4 text-center text-sm text-muted-foreground">
-          Wallet data from X1 Network RPC
-        </div>
-      </footer>
+      <Footer />
     </div>
   );
 };
