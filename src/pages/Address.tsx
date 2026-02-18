@@ -123,7 +123,7 @@ const Address = () => {
                       )}
                     </Button>
                   </div>
-                  <div className="flex items-center gap-4 text-sm">
+                  <div className="flex items-center gap-4 text-sm flex-wrap">
                     <Badge variant={wallet.accountType} className="text-xs capitalize">
                       {wallet.accountType}
                     </Badge>
@@ -135,6 +135,20 @@ const Address = () => {
                       <span className="text-muted-foreground">Tokens: </span>
                       <span className="font-medium">{wallet.tokens.length}</span>
                     </div>
+                    {(() => {
+                      const tokenVal = wallet.tokens.reduce((s, t) => s + (t.valueUsd ?? 0), 0);
+                      const xntVal = wallet.nativePrice != null ? wallet.solBalance * wallet.nativePrice : 0;
+                      const total = tokenVal + xntVal;
+                      if (!isFinite(total) || total <= 0) return null;
+                      return (
+                        <div>
+                          <span className="text-muted-foreground">Total Value: </span>
+                          <span className="font-semibold">
+                            ${total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </span>
+                        </div>
+                      );
+                    })()}
                   </div>
                 </div>
               </CardHeader>
@@ -146,7 +160,12 @@ const Address = () => {
                 <h3 className="text-lg font-semibold">Token Holdings</h3>
               </CardHeader>
               <CardContent>
-                <WalletTokens tokens={wallet.tokens} />
+                <WalletTokens
+                  tokens={wallet.tokens}
+                  solBalance={wallet.solBalance}
+                  nativeLogo={wallet.nativeLogo}
+                  nativePrice={wallet.nativePrice}
+                />
               </CardContent>
             </Card>
           </>

@@ -92,10 +92,14 @@ export const PortfolioDashboard = () => {
     }
   }, [addressListKey, initialLoading]);
 
+  const isRefreshingRef = useRef(false);
+
   const refreshWallets = useCallback(async () => {
     const current = savedWalletsRef.current;
     if (current.length === 0) return;
+    if (isRefreshingRef.current) return;
 
+    isRefreshingRef.current = true;
     setRefreshing(true);
     try {
       const addresses = current.map(w => w.address);
@@ -113,6 +117,7 @@ export const PortfolioDashboard = () => {
       console.error("Failed to refresh wallets:", error);
       toast.error("Failed to refresh wallet balances");
     }
+    isRefreshingRef.current = false;
     setRefreshing(false);
   }, []);
 
@@ -249,6 +254,12 @@ export const PortfolioDashboard = () => {
               walletsCount={wallets.length}
               totalXnt={wallets.reduce((sum, w) => sum + w.solBalance, 0)}
               totalTokens={wallets.reduce((sum, w) => sum + w.tokens.length, 0)}
+              totalValueUsd={(() => {
+                const tokenVal = wallets.flatMap(w => w.tokens).reduce((s, t) => s + (t.valueUsd ?? 0), 0);
+                const xntVal = wallets.reduce((s, w) => s + (w.nativePrice != null ? w.solBalance * w.nativePrice : 0), 0);
+                const total = tokenVal + xntVal;
+                return total > 0 && isFinite(total) ? total : undefined;
+              })()}
             />
             <AggregatedTokensTable wallets={wallets} />
           </>

@@ -1,4 +1,4 @@
-import { Wallet, Coins, Layers } from "lucide-react";
+import { Wallet, Coins, Layers, DollarSign } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatXNT } from "@/lib/format";
 
@@ -6,11 +6,15 @@ interface PortfolioStatsProps {
   walletsCount: number;
   totalXnt: number;
   totalTokens: number;
+  totalValueUsd?: number;
 }
 
-export const PortfolioStats = ({ walletsCount, totalXnt, totalTokens }: PortfolioStatsProps) => {
+export const PortfolioStats = ({ walletsCount, totalXnt, totalTokens, totalValueUsd }: PortfolioStatsProps) => {
+  const formatUsd = (value: number) =>
+    `$${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
   return (
-    <div className="grid gap-4 md:grid-cols-3">
+    <div className="grid gap-4 md:grid-cols-4">
       <Card>
         <CardHeader className="pb-3">
           <div className="flex items-center gap-2">
@@ -55,6 +59,23 @@ export const PortfolioStats = ({ walletsCount, totalXnt, totalTokens }: Portfoli
         <CardContent>
           <p className="text-3xl font-bold">{totalTokens}</p>
           <p className="text-xs text-muted-foreground mt-1">SPL tokens held</p>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex items-center gap-2">
+            <div className="h-8 w-8 rounded-lg bg-yellow-500/10 flex items-center justify-center">
+              <DollarSign className="h-4 w-4 text-yellow-500" />
+            </div>
+            <CardTitle className="text-base">Portfolio Value</CardTitle>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <p className="text-3xl font-bold">
+            {totalValueUsd != null ? formatUsd(totalValueUsd) : "—"}
+          </p>
+          <p className="text-xs text-muted-foreground mt-1">Total USD value</p>
         </CardContent>
       </Card>
     </div>

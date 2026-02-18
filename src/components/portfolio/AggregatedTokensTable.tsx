@@ -18,6 +18,8 @@ interface AggregatedToken {
   name: string;
   logoURI?: string;
   totalAmount: number;
+  totalValueUsd?: number;
+  price?: number;
   decimals: number;
 }
 
@@ -25,21 +27,28 @@ interface AggregatedTokensTableProps {
   wallets: WalletBalance[];
 }
 
+const formatUsd = (value: number) =>
+  value >= 0.01
+    ? `$${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+    : `$${value.toFixed(4)}`;
+
 export const AggregatedTokensTable = ({ wallets }: AggregatedTokensTableProps) => {
   const [isOpen, setIsOpen] = useState(true);
+  const [nativeLogoError, setNativeLogoError] = useState(false);
 
   useEffect(() => {
     const saved = localStorage.getItem(AGGREGATED_ACCORDION_KEY);
-    if (saved !== null) {
-      setIsOpen(saved === "true");
-    }
+    if (saved !== null) setIsOpen(saved === "true");
   }, []);
 
   useEffect(() => {
     localStorage.setItem(AGGREGATED_ACCORDION_KEY, String(isOpen));
   }, [isOpen]);
 
-  const totalXNT = wallets.reduce((sum, wallet) => sum + wallet.solBalance, 0);
+  const totalXNT = wallets.reduce((sum, w) => sum + w.solBalance, 0);
+  const nativeLogo = wallets.find(w => w.nativeLogo)?.nativeLogo;
+  const nativePrice = wallets.find(w => w.nativePrice != null)?.nativePrice;
+  const totalXNTValueUsd = nativePrice != null ? totalXNT * nativePrice : undefined;
 
   const tokenMap = new Map<string, AggregatedToken>();
   for (const wallet of wallets) {
@@ -47,6 +56,7 @@ export const AggregatedTokensTable = ({ wallets }: AggregatedTokensTableProps) =
       const existing = tokenMap.get(token.mint);
       if (existing) {
         existing.totalAmount += token.uiAmount;
+        if (token.valueUsd != null) existing.totalValueUsd = (existing.totalValueUsd ?? 0) + token.valueUsd;
       } else {
         tokenMap.set(token.mint, {
           mint: token.mint,
@@ -54,13 +64,23 @@ export const AggregatedTokensTable = ({ wallets }: AggregatedTokensTableProps) =
           name: token.name || "Unknown Token",
           logoURI: token.logoURI,
           totalAmount: token.uiAmount,
+          totalValueUsd: token.valueUsd,
+          price: token.price,
           decimals: token.decimals,
         });
       }
     }
   }
 
-  const aggregatedTokens = Array.from(tokenMap.values()).sort((a, b) => b.totalAmount - a.totalAmount);
+  const aggregatedTokens = Array.from(tokenMap.values())
+    .sort((a, b) => {
+      const aHasPrice = a.price != null;
+      const bHasPrice = b.price != null;
+      if (aHasPrice !== bHasPrice) return aHasPrice ? -1 : 1;
+      return aHasPrice
+        ? (b.totalValueUsd ?? 0) - (a.totalValueUsd ?? 0)
+        : b.totalAmount - a.totalAmount;
+    });
   const hasXNT = totalXNT > 0;
   const hasTokens = aggregatedTokens.length > 0 || hasXNT;
 
@@ -72,7 +92,7 @@ export const AggregatedTokensTable = ({ wallets }: AggregatedTokensTableProps) =
     <div className="rounded-xl border bg-card overflow-hidden">
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="w-full flex items-center justify-between px-5 py-4 hover:bg-muted/50 transition-colors"
+        className="w-full flex items-center justify-between px-6 py-4 hover:bg-muted/50 transition-colors"
       >
         <div className="flex items-center gap-3">
           <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center">
@@ -89,14 +109,15 @@ export const AggregatedTokensTable = ({ wallets }: AggregatedTokensTableProps) =
       </button>
 
       {isOpen && (
-        <div className="px-5 pb-5 pt-3">
+        <div className="px-6 pb-6 pt-3">
           <div className="rounded-lg border overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow className="hover:bg-transparent">
                   <TableHead className="pl-4">Token</TableHead>
-                  <TableHead className="hidden sm:table-cell">Symbol</TableHead>
-                  <TableHead className="text-right pr-4">Total Balance</TableHead>
+                  <TableHead className="text-right hidden md:table-cell">Price</TableHead>
+                  <TableHead className="text-right pr-4">Amount</TableHead>
+                  <TableHead className="text-right hidden md:table-cell pr-4">USD Value</TableHead>
                   <TableHead className="w-10"></TableHead>
                 </TableRow>
               </TableHeader>
@@ -105,18 +126,32 @@ export const AggregatedTokensTable = ({ wallets }: AggregatedTokensTableProps) =
                   <TableRow className="hover:bg-muted/50">
                     <TableCell className="pl-4">
                       <div className="flex items-center gap-3">
-                        <div className="h-7 w-7 rounded-full bg-gradient-to-br from-emerald-400 to-teal-500 flex items-center justify-center shadow-sm">
-                          <span className="text-[9px] font-bold text-white">X1</span>
-                        </div>
+                        {nativeLogo && !nativeLogoError ? (
+                          <img
+                            src={nativeLogo}
+                            alt="XNT"
+                            className="h-7 w-7 rounded-full object-cover ring-1 ring-border"
+                            onError={() => setNativeLogoError(true)}
+                          />
+                        ) : (
+                          <div className="h-7 w-7 rounded-full bg-muted flex items-center justify-center ring-1 ring-border">
+                            <Coins className="h-3 w-3 text-muted-foreground" />
+                          </div>
+                        )}
                         <div>
-                          <span className="font-medium text-sm">X1 Native Token</span>
-                          <span className="sm:hidden text-xs text-muted-foreground ml-2">XNT</span>
+                          <div className="font-medium text-sm">X1 Native Token</div>
+                          <div className="text-xs text-muted-foreground">XNT</div>
                         </div>
                       </div>
                     </TableCell>
-                    <TableCell className="hidden sm:table-cell font-medium text-muted-foreground text-sm">XNT</TableCell>
+                    <TableCell className="text-right hidden md:table-cell text-sm text-muted-foreground">
+                      {nativePrice != null ? formatUsd(nativePrice) : "—"}
+                    </TableCell>
                     <TableCell className="text-right font-medium pr-4">
                       {totalXNT.toLocaleString(undefined, { maximumFractionDigits: 4 })}
+                    </TableCell>
+                    <TableCell className="text-right hidden md:table-cell pr-4 text-sm font-medium">
+                      {totalXNTValueUsd != null ? formatUsd(totalXNTValueUsd) : "—"}
                     </TableCell>
                     <TableCell></TableCell>
                   </TableRow>
@@ -135,22 +170,28 @@ export const AggregatedTokensTable = ({ wallets }: AggregatedTokensTableProps) =
 
 const AggregatedTokenRow = ({ token }: { token: AggregatedToken }) => {
   const [copied, setCopied] = useState(false);
+  const [imageError, setImageError] = useState(false);
 
   const copyMint = async () => {
-    await navigator.clipboard.writeText(token.mint);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    try {
+      await navigator.clipboard.writeText(token.mint);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // clipboard unavailable (e.g. HTTP context)
+    }
   };
 
   return (
     <TableRow className="hover:bg-muted/50">
       <TableCell className="pl-4">
         <div className="flex items-center gap-3">
-          {token.logoURI ? (
+          {token.logoURI && !imageError ? (
             <img
               src={token.logoURI}
               alt={token.symbol}
               className="h-7 w-7 rounded-full object-cover ring-1 ring-border"
+              onError={() => setImageError(true)}
             />
           ) : (
             <div className="h-7 w-7 rounded-full bg-muted flex items-center justify-center ring-1 ring-border">
@@ -158,14 +199,19 @@ const AggregatedTokenRow = ({ token }: { token: AggregatedToken }) => {
             </div>
           )}
           <div>
-            <span className="font-medium text-sm">{token.name}</span>
-            <span className="sm:hidden text-xs text-muted-foreground ml-2">{token.symbol}</span>
+            <div className="font-medium text-sm">{token.name}</div>
+            <div className="text-xs text-muted-foreground">{token.symbol}</div>
           </div>
         </div>
       </TableCell>
-      <TableCell className="hidden sm:table-cell font-medium text-muted-foreground text-sm">{token.symbol}</TableCell>
+      <TableCell className="text-right hidden md:table-cell text-sm text-muted-foreground">
+        {token.price != null ? formatUsd(token.price) : "—"}
+      </TableCell>
       <TableCell className="text-right font-medium pr-4">
         {token.totalAmount.toLocaleString(undefined, { maximumFractionDigits: 6 })}
+      </TableCell>
+      <TableCell className="text-right hidden md:table-cell pr-4 text-sm font-medium">
+        {token.totalValueUsd != null ? formatUsd(token.totalValueUsd) : "—"}
       </TableCell>
       <TableCell>
         <div

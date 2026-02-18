@@ -1,5 +1,7 @@
 // X1 Network RPC utilities
-const RPC_URL = import.meta.env.VITE_X1_RPC_URL || "https://rpc.mainnet.x1.xyz";
+// Route all RPC calls through the backend proxy to avoid CORS issues
+const API_URL = import.meta.env.VITE_API_URL || '';
+const RPC_URL = `${API_URL}/api/rpc`;
 
 export interface EpochInfo {
   epoch: number;

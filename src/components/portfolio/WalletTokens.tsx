@@ -13,11 +13,26 @@ import { TokenBalance } from "@/lib/wallet-rpc";
 interface WalletTokensProps {
   tokens: TokenBalance[];
   solBalance?: number;
+  nativeLogo?: string;
+  nativePrice?: number;
 }
 
-export const WalletTokens = ({ tokens, solBalance }: WalletTokensProps) => {
+const formatUsd = (value: number) =>
+  value >= 0.01
+    ? `$${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+    : `$${value.toFixed(4)}`;
+
+const formatPrice = (price: number) =>
+  price >= 0.01
+    ? `$${price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}`
+    : `$${price.toPrecision(4)}`;
+
+export const WalletTokens = ({ tokens, solBalance, nativeLogo, nativePrice }: WalletTokensProps) => {
+  const [nativeLogoError, setNativeLogoError] = useState(false);
+
   const hasXNT = solBalance !== undefined && solBalance > 0;
   const hasTokens = tokens.length > 0 || hasXNT;
+  const nativeValueUsd = nativePrice != null && solBalance ? solBalance * nativePrice : undefined;
 
   if (!hasTokens) {
     return (
@@ -34,8 +49,9 @@ export const WalletTokens = ({ tokens, solBalance }: WalletTokensProps) => {
         <TableHeader>
           <TableRow className="hover:bg-transparent">
             <TableHead className="pl-4">Token</TableHead>
-            <TableHead className="hidden sm:table-cell">Symbol</TableHead>
-            <TableHead className="text-right pr-4">Balance</TableHead>
+            <TableHead className="text-right hidden md:table-cell">Price</TableHead>
+            <TableHead className="text-right pr-4">Amount</TableHead>
+            <TableHead className="text-right hidden md:table-cell pr-4">USD Value</TableHead>
             <TableHead className="w-10"></TableHead>
           </TableRow>
         </TableHeader>
@@ -44,18 +60,32 @@ export const WalletTokens = ({ tokens, solBalance }: WalletTokensProps) => {
             <TableRow className="hover:bg-muted/50">
               <TableCell className="pl-4">
                 <div className="flex items-center gap-3">
-                  <div className="h-7 w-7 rounded-full bg-gradient-to-br from-emerald-400 to-teal-500 flex items-center justify-center shadow-sm">
-                    <span className="text-[9px] font-bold text-white">X1</span>
-                  </div>
+                  {nativeLogo && !nativeLogoError ? (
+                    <img
+                      src={nativeLogo}
+                      alt="XNT"
+                      className="h-7 w-7 rounded-full object-cover ring-1 ring-border"
+                      onError={() => setNativeLogoError(true)}
+                    />
+                  ) : (
+                    <div className="h-7 w-7 rounded-full bg-muted flex items-center justify-center ring-1 ring-border">
+                      <Coins className="h-3 w-3 text-muted-foreground" />
+                    </div>
+                  )}
                   <div>
-                    <span className="font-medium text-sm">X1 Native Token</span>
-                    <span className="sm:hidden text-xs text-muted-foreground ml-2">XNT</span>
+                    <div className="font-medium text-sm">X1 Native Token</div>
+                    <div className="text-xs text-muted-foreground">XNT</div>
                   </div>
                 </div>
               </TableCell>
-              <TableCell className="hidden sm:table-cell font-medium text-muted-foreground text-sm">XNT</TableCell>
+              <TableCell className="text-right hidden md:table-cell text-sm text-muted-foreground">
+                {nativePrice != null ? formatPrice(nativePrice) : "—"}
+              </TableCell>
               <TableCell className="text-right font-medium pr-4">
-                {solBalance.toLocaleString(undefined, { maximumFractionDigits: 4 })}
+                {solBalance!.toLocaleString(undefined, { maximumFractionDigits: 4 })}
+              </TableCell>
+              <TableCell className="text-right hidden md:table-cell pr-4 text-sm font-medium">
+                {nativeValueUsd != null ? formatUsd(nativeValueUsd) : "—"}
               </TableCell>
               <TableCell></TableCell>
             </TableRow>
@@ -71,22 +101,28 @@ export const WalletTokens = ({ tokens, solBalance }: WalletTokensProps) => {
 
 const TokenRow = ({ token }: { token: TokenBalance }) => {
   const [copied, setCopied] = useState(false);
+  const [imageError, setImageError] = useState(false);
 
   const copyMint = async () => {
-    await navigator.clipboard.writeText(token.mint);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    try {
+      await navigator.clipboard.writeText(token.mint);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // clipboard unavailable (e.g. HTTP context)
+    }
   };
 
   return (
     <TableRow className="hover:bg-muted/50">
       <TableCell className="pl-4">
         <div className="flex items-center gap-3">
-          {token.logoURI ? (
+          {token.logoURI && !imageError ? (
             <img
               src={token.logoURI}
               alt={token.symbol}
               className="h-7 w-7 rounded-full object-cover ring-1 ring-border"
+              onError={() => setImageError(true)}
             />
           ) : (
             <div className="h-7 w-7 rounded-full bg-muted flex items-center justify-center ring-1 ring-border">
@@ -94,14 +130,19 @@ const TokenRow = ({ token }: { token: TokenBalance }) => {
             </div>
           )}
           <div>
-            <span className="font-medium text-sm">{token.name}</span>
-            <span className="sm:hidden text-xs text-muted-foreground ml-2">{token.symbol}</span>
+            <div className="font-medium text-sm">{token.name}</div>
+            <div className="text-xs text-muted-foreground">{token.symbol}</div>
           </div>
         </div>
       </TableCell>
-      <TableCell className="hidden sm:table-cell font-medium text-muted-foreground text-sm">{token.symbol}</TableCell>
+      <TableCell className="text-right hidden md:table-cell text-sm text-muted-foreground">
+        {token.price != null ? formatPrice(token.price) : "—"}
+      </TableCell>
       <TableCell className="text-right font-medium pr-4">
         {token.uiAmount.toLocaleString(undefined, { maximumFractionDigits: 6 })}
+      </TableCell>
+      <TableCell className="text-right hidden md:table-cell pr-4 text-sm font-medium">
+        {token.valueUsd != null ? formatUsd(token.valueUsd) : "—"}
       </TableCell>
       <TableCell>
         <div

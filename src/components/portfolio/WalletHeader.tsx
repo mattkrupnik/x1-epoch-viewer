@@ -1,4 +1,4 @@
-import { Copy, Check, ExternalLink, Trash2, Vote, Landmark, Wallet } from "lucide-react";
+import { Copy, Check, ExternalLink, Trash2, Vote, Landmark, Wallet, Share2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { formatXNT } from "@/lib/format";
 import { Link } from "react-router-dom";
@@ -11,6 +11,7 @@ interface WalletHeaderProps {
   accountType: WalletAccountType;
   isCopied: boolean;
   onCopy: () => void;
+  onShare?: () => void;
   onRemove: () => void;
 }
 
@@ -27,6 +28,7 @@ export const WalletHeader = ({
   accountType,
   isCopied,
   onCopy,
+  onShare,
   onRemove
 }: WalletHeaderProps) => {
   const truncateAddress = (addr: string) => `${addr.slice(0, 6)}...${addr.slice(-6)}`;
@@ -73,6 +75,18 @@ export const WalletHeader = ({
             >
               <ExternalLink className="h-3 w-3" />
             </a>
+            {onShare && (
+              <div
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onShare();
+                }}
+                title="Copy link to wallet"
+                className="h-4 w-4 sm:h-5 sm:w-5 flex-shrink-0 flex items-center justify-center rounded-md hover:bg-muted hover:text-primary cursor-pointer transition-colors"
+              >
+                <Share2 className="h-3 w-3" />
+              </div>
+            )}
           </div>
           <div className="flex items-center gap-1.5 mt-1 flex-wrap">
             <Badge variant={accountType} className="text-xs capitalize">
