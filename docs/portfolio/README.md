@@ -11,18 +11,22 @@ It provides a fast, practical view of holdings, account types, token distributio
 ## ✨ Core Functionality
 
 - Track multiple addresses at the same time
-- Add and remove addresses from a persistent watchlist
+- Add and remove addresses from your watchlist
 - Auto-refresh balances and token holdings
 - Show account type per address (`vote`, `stake`, `wallet`)
 - Display total XNT across all tracked addresses
 - Display total token count across all tracked addresses
 - Show token prices (USD) per token where available
+- Show 24h change (%) for assets where data is available
 - Show USD value per token holding
-- Display total portfolio value (USD) across all wallets and tokens
+- Display total portfolio value (USD)
 - Show an aggregated token table across the full portfolio with combined USD values
+- Hide/unhide tokens from portfolio views
+- Separate "Hidden" tab and dedicated hidden tokens section
 - Open a detailed per-address page
-- Persist tracked addresses and UI expansion state in browser storage
-- Filter tracked addresses by type (`All`, `Vote`, `Stake`, `Wallet`)
+- Share wallet details page link (`/portfolio/:address`) via one-click copy
+- Filter tracked addresses by type (`All`, `Vote`, `Stake`, `Wallet`, `Hidden`)
+- Keep your tracked addresses and UI state after page reloads
 
 ## 🌐 Routes
 
@@ -41,20 +45,24 @@ It provides a fast, practical view of holdings, account types, token distributio
 
 ### Data Fetching Flow
 
-For each tracked address, a single backend API call returns native XNT balance, all SPL token balances,
-metadata (name, symbol, logo), and live USD prices.
+For each tracked address, frontend first requests:
+- `GET /api/wallet-tokens?address=...` (backend proxy/source for balances + metadata + prices).
+
+If that source is unavailable, frontend falls back to direct RPC token account reads
+(balances still render, but price/value fields may be missing).
 
 Account type is derived from account ownership (via X1 RPC `getAccountInfo`):
 - `vote` for vote program accounts,
 - `stake` for stake program accounts,
 - `wallet` for regular wallet accounts.
 
-Backend responses are cached per address for 60 seconds to reduce external API load.
+Backend responses are cached per address (short TTL) to reduce external API load.
 
 ### Token Price & Value Display
 
 - **Price column**: shows current USD price for tokens with known market data; `—` for unknown tokens.
 - **USD Value column**: shows `amount × price` per token; `—` if price is unavailable.
+- **24h Change**: percentage change is shown when source data is available.
 - Tokens with known price are sorted above tokens without price.
 - Within each group, tokens are sorted by USD value (or raw amount) descending.
 
@@ -65,7 +73,8 @@ When at least one address is tracked, dashboard sections include:
   - **Total XNT** — native balance across all wallets,
   - **Wallets Tracked** — number of tracked addresses,
   - **Total Tokens** — total SPL token entries,
-  - **Portfolio Value** — total USD value of all holdings (XNT + tokens, shown when price data is available),
+  - **Portfolio Value** — total USD value of visible holdings (XNT + visible tokens),
+  - **Portfolio 24h** — weighted 24h change based on available value-weighted asset changes,
 - aggregated token table (cross-wallet view with combined amounts and USD values),
 - filter tabs by account type,
 - collapsible wallet cards with quick actions.
@@ -76,6 +85,16 @@ The "All Tokens" section combines holdings from all wallets:
 - Native XNT shown first with logo, price, and combined balance.
 - SPL tokens aggregated by mint address (amounts and values summed across wallets).
 - Tokens with prices sorted above tokens without; within each group sorted by USD value descending.
+- Hidden tokens are excluded from visible aggregated totals.
+
+### Hidden Tokens
+
+- Any token can be hidden from wallet/aggregate views.
+- Hidden token mints are persisted in browser storage.
+- Hidden tokens are accessible via:
+  - `Hidden` tab (portfolio-level workflow),
+  - dedicated **Hidden Tokens** section with unhide action and value summary.
+- Hidden tokens are excluded from visible portfolio value calculations.
 
 ### Wallet Card Actions
 
@@ -83,6 +102,7 @@ Each tracked wallet card supports:
 - copy wallet address,
 - open external explorer link,
 - open local detailed wallet view,
+- copy shareable wallet details URL,
 - remove wallet from tracking list.
 
 ### Wallet Details Page
@@ -100,6 +120,7 @@ The module stores state in `localStorage` to survive page reloads:
 - tracked addresses and detected account types,
 - accordion expansion state for wallet cards,
 - "All Tokens" table open/collapsed state,
+- hidden token mints list,
 - app default page preference (`validators` or `portfolio`).
 
 ## ⚙️ UX & Settings Integration
@@ -107,6 +128,8 @@ The module stores state in `localStorage` to survive page reloads:
 - Shared top navigation allows switching between `Validators` and `Portfolio`.
 - Global settings include theme toggle and default landing page selection.
 - If default page is set to `portfolio`, opening `/` redirects users to Portfolio.
+- Portfolio page includes SEO/open-graph metadata configuration.
+- Portfolio includes a support banner area above the main content.
 
 ## ⚠️ Notes & Limitations
 
@@ -126,8 +149,11 @@ The module stores state in `localStorage` to survive page reloads:
 - wallet card with token list renders (name, symbol, logo),
 - price and USD value columns are populated for known tokens,
 - Portfolio Value card shows total USD value,
+- 24h change appears for assets with change data,
 - aggregated "All Tokens" table shows combined holdings,
-- filters work (`All/Vote/Stake/Wallet`),
+- hide/unhide token flow works and `Hidden` tab appears when relevant,
+- filters work (`All/Vote/Stake/Wallet/Hidden`),
+- wallet share action copies `/portfolio/:address` URL,
 - navigation to `/portfolio/:address`,
 - refresh and remove actions,
 - persisted state after page reload (`localStorage`).
@@ -142,10 +168,12 @@ The module stores state in `localStorage` to survive page reloads:
 ### Prices show `—` for all tokens
 - Price API may be temporarily unavailable; balances are still shown without price data.
 - Token may not have known market data; this is expected for unknown or low-liquidity assets.
+- In fallback RPC mode, price/value data can be unavailable by design.
 
 ### Portfolio Value card not visible
 - Shown only when at least one asset has a known USD price.
 - Verify the backend server is running and reachable.
+- Hidden tokens are excluded from visible portfolio totals.
 
 ### `/portfolio` does not open from `/`
 - Set `defaultPage` to `portfolio` in Settings, or open `/portfolio` directly.

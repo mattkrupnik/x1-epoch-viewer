@@ -1,4 +1,4 @@
-import { Wallet, Coins, Layers, DollarSign } from "lucide-react";
+import { Wallet, Coins, Layers, DollarSign, TrendingUp, TrendingDown } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatXNT } from "@/lib/format";
 
@@ -7,11 +7,12 @@ interface PortfolioStatsProps {
   totalXnt: number;
   totalTokens: number;
   totalValueUsd?: number;
+  totalChange24h?: number;
 }
 
-export const PortfolioStats = ({ walletsCount, totalXnt, totalTokens, totalValueUsd }: PortfolioStatsProps) => {
+export const PortfolioStats = ({ walletsCount, totalXnt, totalTokens, totalValueUsd, totalChange24h }: PortfolioStatsProps) => {
   const formatUsd = (value: number) =>
-    `$${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    `$${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
   return (
     <div className="grid gap-4 md:grid-cols-4">
@@ -75,7 +76,19 @@ export const PortfolioStats = ({ walletsCount, totalXnt, totalTokens, totalValue
           <p className="text-3xl font-bold">
             {totalValueUsd != null ? formatUsd(totalValueUsd) : "—"}
           </p>
-          <p className="text-xs text-muted-foreground mt-1">Total USD value</p>
+          <div className="flex items-center gap-2 mt-1">
+            <p className="text-xs text-muted-foreground">Total USD value</p>
+            {totalChange24h != null && (
+              <span className={`flex items-center text-xs font-medium ${totalChange24h >= 0 ? "text-green-500" : "text-red-500"}`}>
+                {totalChange24h >= 0 ? (
+                  <TrendingUp className="h-3 w-3 mr-0.5" />
+                ) : (
+                  <TrendingDown className="h-3 w-3 mr-0.5" />
+                )}
+                {Math.abs(totalChange24h).toFixed(2)}%
+              </span>
+            )}
+          </div>
         </CardContent>
       </Card>
     </div>

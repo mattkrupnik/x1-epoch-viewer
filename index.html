@@ -8,14 +8,18 @@
     <meta name="description" content="Track your X1 Network validator rewards and epoch statistics in real-time. View detailed reward history and performance metrics." />
     <meta name="author" content="X1 Validator Dashboard" />
 
-    <!-- Google tag (gtag.js) -->
-    <script async src="https://www.googletagmanager.com/gtag/js?id=G-K48CJKNL6Q"></script>
+    <!-- Google tag (gtag.js) — disabled on localhost -->
     <script>
       window.dataLayer = window.dataLayer || [];
       function gtag(){dataLayer.push(arguments);}
-      gtag('js', new Date());
-
-      gtag('config', 'G-K48CJKNL6Q');
+      if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+        let s = document.createElement('script');
+        s.async = true;
+        s.src = 'https://www.googletagmanager.com/gtag/js?id=G-K48CJKNL6Q';
+        document.head.appendChild(s);
+        gtag('js', new Date());
+        gtag('config', 'G-K48CJKNL6Q');
+      }
     </script>
 
     <meta property="og:title" content="X1 Validator Dashboard - Monitor Your Rewards" />
