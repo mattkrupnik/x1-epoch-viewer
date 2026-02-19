@@ -144,7 +144,7 @@ const Address = () => {
                         <div>
                           <span className="text-muted-foreground">Total Value: </span>
                           <span className="font-semibold">
-                            ${total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            ${total.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                           </span>
                         </div>
                       );
@@ -165,6 +165,8 @@ const Address = () => {
                   solBalance={wallet.solBalance}
                   nativeLogo={wallet.nativeLogo}
                   nativePrice={wallet.nativePrice}
+                  nativeChange24h={wallet.nativeChange24h}
+                  showHideControls={false}
                 />
               </CardContent>
             </Card>

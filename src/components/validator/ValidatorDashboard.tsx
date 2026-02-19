@@ -37,6 +37,8 @@ import { ValidatorCard } from "./ValidatorCard";
 import { formatXNT, formatTimeRemaining } from "@/lib/format";
 import { ChartSettingsProvider } from "@/hooks/useChartSettings";
 import { SettingsDialog } from "@/components/shared/SettingsDialog";
+import { SupportBanner } from "@/components/shared/SupportBanner";
+import { PageMeta } from "@/components/shared/PageMeta";
 import { Navigation } from "@/components/shared/Navigation";
 
 export type { EpochReward } from "@/types/validator";
@@ -523,6 +525,12 @@ export const ValidatorDashboard = () => {
   return (
     <ChartSettingsProvider>
     <div className="min-h-screen flex flex-col">
+      <PageMeta
+        title="X1 Validator Dashboard - Monitor Your Rewards"
+        description="Track your X1 Network validator rewards and epoch statistics in real-time. View detailed reward history and performance metrics."
+        ogTitle="X1 Validator Dashboard"
+        ogDescription="Track your X1 Network validator rewards and epoch statistics in real-time."
+      />
       <header className="sticky-disabled top-0 z-10 border-b bg-card/70 backdrop-blur-xl">
         <div className="container mx-auto px-4 py-3 sm:py-4">
           <div className="flex items-center justify-between gap-3">
@@ -574,6 +582,8 @@ export const ValidatorDashboard = () => {
           </div>
         </div>
       </header>
+
+      <SupportBanner />
 
       <main className="container mx-auto px-4 py-6 sm:py-8 space-y-6">
         {/* Search Section */}
