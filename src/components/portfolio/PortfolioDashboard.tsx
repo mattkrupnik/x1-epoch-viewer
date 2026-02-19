@@ -7,12 +7,16 @@ import { Accordion } from "@/components/ui/accordion";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { SettingsDialog } from "@/components/shared/SettingsDialog";
+import { SupportBanner } from "@/components/shared/SupportBanner";
+import { PageMeta } from "@/components/shared/PageMeta";
 import { Navigation } from "@/components/shared/Navigation";
 import { Footer } from "@/components/shared/Footer";
 import { WalletCard } from "./WalletCard";
 import { PortfolioStats } from "./PortfolioStats";
 import { AggregatedTokensTable } from "./AggregatedTokensTable";
+import { HiddenTokensSection } from "./HiddenTokensSection";
 import { getMultipleWalletBalances, WalletBalance, WalletAccountType } from "@/lib/wallet-rpc";
+import { HiddenTokensProvider, useHiddenTokens } from "@/lib/hidden-tokens";
 
 const STORAGE_KEY = "portfolioWallets";
 const ACCORDION_STATE_KEY = "portfolioAccordionState";
@@ -22,7 +26,14 @@ interface SavedWallet {
   accountType: WalletAccountType;
 }
 
-export const PortfolioDashboard = () => {
+export const PortfolioDashboard = () => (
+  <HiddenTokensProvider>
+    <PortfolioDashboardInner />
+  </HiddenTokensProvider>
+);
+
+const PortfolioDashboardInner = () => {
+  const { hidden } = useHiddenTokens();
   const [walletAddress, setWalletAddress] = useState("");
   const [wallets, setWallets] = useState<WalletBalance[]>([]);
   const [savedWallets, setSavedWallets] = useState<SavedWallet[]>([]);
@@ -30,7 +41,7 @@ export const PortfolioDashboard = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
   const [openAccordions, setOpenAccordions] = useState<string[]>([]);
-  const [activeTab, setActiveTab] = useState<"all" | WalletAccountType>("all");
+  const [activeTab, setActiveTab] = useState<"all" | "hidden" | WalletAccountType>("all");
 
   // Load saved addresses and accordion state from localStorage
   useEffect(() => {
@@ -79,6 +90,12 @@ export const PortfolioDashboard = () => {
       localStorage.setItem(ACCORDION_STATE_KEY, JSON.stringify(openAccordions));
     }
   }, [openAccordions, wallets.length]);
+
+  useEffect(() => {
+    if (hidden.size === 0 && activeTab === "hidden") {
+      setActiveTab("all");
+    }
+  }, [hidden.size, activeTab]);
 
   const addressListKey = savedWallets.map(w => w.address).join(",");
   const savedWalletsRef = useRef(savedWallets);
@@ -167,8 +184,8 @@ export const PortfolioDashboard = () => {
     }
   };
 
-  const filteredWallets = activeTab === "all"
-    ? wallets
+  const filteredWallets = (activeTab === "all" || activeTab === "hidden")
+    ? (activeTab === "hidden" ? [] : wallets)
     : wallets.filter(w => w.accountType === activeTab);
 
   const tabCounts = {
@@ -180,6 +197,12 @@ export const PortfolioDashboard = () => {
 
   return (
     <div className="min-h-screen flex flex-col">
+      <PageMeta
+        title="X1 Portfolio Tracker - Monitor Your Wallet Holdings"
+        description="Track your X1 Network wallet balances, token holdings and portfolio value in real-time. Monitor XNT and SPL token performance across multiple wallets."
+        ogTitle="X1 Portfolio Tracker"
+        ogDescription="Track your X1 Network wallet balances and token portfolio in real-time."
+      />
       <header className="border-b bg-card/70 backdrop-blur-xl">
         <div className="container mx-auto px-4 py-3 sm:py-4">
           <div className="flex items-center justify-between gap-3">
@@ -213,6 +236,8 @@ export const PortfolioDashboard = () => {
           </div>
         </div>
       </header>
+
+      <SupportBanner />
 
       <main className="container mx-auto px-4 py-6 sm:py-8 space-y-6">
         {/* Add Wallet */}
@@ -255,7 +280,7 @@ export const PortfolioDashboard = () => {
               totalXnt={wallets.reduce((sum, w) => sum + w.solBalance, 0)}
               totalTokens={wallets.reduce((sum, w) => sum + w.tokens.length, 0)}
               totalValueUsd={(() => {
-                const tokenVal = wallets.flatMap(w => w.tokens).reduce((s, t) => s + (t.valueUsd ?? 0), 0);
+                const tokenVal = wallets.flatMap(w => w.tokens).filter(t => !hidden.has(t.mint)).reduce((s, t) => s + (t.valueUsd ?? 0), 0);
                 const xntVal = wallets.reduce((s, w) => s + (w.nativePrice != null ? w.solBalance * w.nativePrice : 0), 0);
                 const total = tokenVal + xntVal;
                 return total > 0 && isFinite(total) ? total : undefined;
@@ -270,6 +295,7 @@ export const PortfolioDashboard = () => {
                     totalWeight += xntVal;
                   }
                   for (const t of w.tokens) {
+                    if (hidden.has(t.mint)) continue;
                     if (t.change24h != null && t.valueUsd != null && t.valueUsd > 0) {
                       weightedSum += t.valueUsd * t.change24h;
                       totalWeight += t.valueUsd;
@@ -285,12 +311,18 @@ export const PortfolioDashboard = () => {
 
         {/* Wallet Type Tabs */}
         {wallets.length > 0 && (
-          <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "all" | WalletAccountType)}>
+          <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "all" | "hidden" | WalletAccountType)}>
             <TabsList>
               <TabsTrigger value="all">All ({tabCounts.all})</TabsTrigger>
               {tabCounts.vote > 0 && <TabsTrigger value="vote">Vote ({tabCounts.vote})</TabsTrigger>}
               {tabCounts.stake > 0 && <TabsTrigger value="stake">Stake ({tabCounts.stake})</TabsTrigger>}
               {tabCounts.wallet > 0 && <TabsTrigger value="wallet">Wallet ({tabCounts.wallet})</TabsTrigger>}
+              {hidden.size > 0 && (
+                <>
+                  <div className="w-px h-5 bg-border mx-1 self-center" />
+                  <TabsTrigger value="hidden">Hidden</TabsTrigger>
+                </>
+              )}
             </TabsList>
           </Tabs>
         )}
@@ -321,7 +353,7 @@ export const PortfolioDashboard = () => {
         )}
 
         {/* Filtered empty state */}
-        {wallets.length > 0 && filteredWallets.length === 0 && (
+        {wallets.length > 0 && filteredWallets.length === 0 && activeTab !== "hidden" && (
           <div className="flex flex-col items-center justify-center py-12 text-center">
             <div className="h-12 w-12 rounded-xl bg-muted flex items-center justify-center mb-3">
               <Wallet className="h-6 w-6 text-muted-foreground" />
@@ -351,6 +383,11 @@ export const PortfolioDashboard = () => {
               />
             ))}
           </Accordion>
+        )}
+
+        {/* Hidden Tokens Section */}
+        {(activeTab === "all" || activeTab === "hidden") && wallets.length > 0 && (
+          <HiddenTokensSection wallets={wallets} />
         )}
       </main>
 

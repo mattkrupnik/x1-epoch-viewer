@@ -2,6 +2,10 @@
 
 `x1rewards.xyz` is a full-stack dashboard for monitoring validator rewards and wallet holdings on the X1 Network.
 
+## 📚 Documentation
+
+- [Portfolio Module README](docs/portfolio/README.md)
+
 ## 📌 Features
 
 ### 🛡 Validator Dashboard (`/`)

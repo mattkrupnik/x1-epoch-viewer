@@ -4,6 +4,7 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/
 import { WalletHeader } from "./WalletHeader";
 import { WalletTokens } from "./WalletTokens";
 import { WalletBalance } from "@/lib/wallet-rpc";
+import { useHiddenTokens } from "@/lib/hidden-tokens";
 import { toast } from "sonner";
 
 interface WalletCardProps {
@@ -20,6 +21,7 @@ export const WalletCard = ({
   accordionValue
 }: WalletCardProps) => {
   const [copied, setCopied] = useState(false);
+  const { hidden } = useHiddenTokens();
 
   const copyAddress = async () => {
     try {
@@ -35,11 +37,16 @@ export const WalletCard = ({
     toast.success("Wallet link copied to clipboard");
   };
 
+  const tokenValue = wallet.tokens.filter(t => !hidden.has(t.mint)).reduce((s, t) => s + (t.valueUsd ?? 0), 0);
+  const xntValue = wallet.nativePrice != null ? wallet.solBalance * wallet.nativePrice : 0;
+  const totalValue = tokenValue + xntValue;
+
   const headerProps = {
     address: wallet.address,
     solBalance: wallet.solBalance,
     tokenCount: wallet.tokens.length,
     accountType: wallet.accountType,
+    valueUsd: totalValue > 0 ? totalValue : undefined,
     isCopied: copied,
     onCopy: copyAddress,
     onShare: shareWallet,

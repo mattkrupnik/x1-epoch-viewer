@@ -12,7 +12,7 @@ interface PortfolioStatsProps {
 
 export const PortfolioStats = ({ walletsCount, totalXnt, totalTokens, totalValueUsd, totalChange24h }: PortfolioStatsProps) => {
   const formatUsd = (value: number) =>
-    `$${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    `$${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
   return (
     <div className="grid gap-4 md:grid-cols-4">

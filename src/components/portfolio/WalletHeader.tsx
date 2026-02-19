@@ -9,6 +9,7 @@ interface WalletHeaderProps {
   solBalance: number;
   tokenCount: number;
   accountType: WalletAccountType;
+  valueUsd?: number;
   isCopied: boolean;
   onCopy: () => void;
   onShare?: () => void;
@@ -26,11 +27,14 @@ export const WalletHeader = ({
   solBalance,
   tokenCount,
   accountType,
+  valueUsd,
   isCopied,
   onCopy,
   onShare,
   onRemove
 }: WalletHeaderProps) => {
+  const formatUsd = (v: number) =>
+    `$${v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   const truncateAddress = (addr: string) => `${addr.slice(0, 6)}...${addr.slice(-6)}`;
   const config = accountTypeConfig[accountType];
   const Icon = config.icon;
@@ -98,6 +102,11 @@ export const WalletHeader = ({
             {tokenCount > 0 && (
               <Badge variant="outline" className="text-xs">
                 {tokenCount} token{tokenCount !== 1 ? "s" : ""}
+              </Badge>
+            )}
+            {valueUsd != null && valueUsd > 0 && (
+              <Badge variant="outline" className="text-xs font-semibold text-foreground">
+                {formatUsd(valueUsd)}
               </Badge>
             )}
           </div>
