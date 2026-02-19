@@ -20,6 +20,7 @@ interface AggregatedToken {
   totalAmount: number;
   totalValueUsd?: number;
   price?: number;
+  change24h?: number;
   decimals: number;
 }
 
@@ -31,6 +32,16 @@ const formatUsd = (value: number) =>
   value >= 0.01
     ? `$${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
     : `$${value.toFixed(4)}`;
+
+const Change24h = ({ value }: { value?: number }) => {
+  if (value == null) return null;
+  const isPositive = value >= 0;
+  return (
+    <span className={`text-xs font-medium ${isPositive ? "text-green-500" : "text-red-500"}`}>
+      {isPositive ? "+" : ""}{value.toFixed(2)}%
+    </span>
+  );
+};
 
 export const AggregatedTokensTable = ({ wallets }: AggregatedTokensTableProps) => {
   const [isOpen, setIsOpen] = useState(true);
@@ -48,6 +59,7 @@ export const AggregatedTokensTable = ({ wallets }: AggregatedTokensTableProps) =
   const totalXNT = wallets.reduce((sum, w) => sum + w.solBalance, 0);
   const nativeLogo = wallets.find(w => w.nativeLogo)?.nativeLogo;
   const nativePrice = wallets.find(w => w.nativePrice != null)?.nativePrice;
+  const nativeChange24h = wallets.find(w => w.nativeChange24h != null)?.nativeChange24h;
   const totalXNTValueUsd = nativePrice != null ? totalXNT * nativePrice : undefined;
 
   const tokenMap = new Map<string, AggregatedToken>();
@@ -66,6 +78,7 @@ export const AggregatedTokensTable = ({ wallets }: AggregatedTokensTableProps) =
           totalAmount: token.uiAmount,
           totalValueUsd: token.valueUsd,
           price: token.price,
+          change24h: token.change24h,
           decimals: token.decimals,
         });
       }
@@ -145,7 +158,10 @@ export const AggregatedTokensTable = ({ wallets }: AggregatedTokensTableProps) =
                       </div>
                     </TableCell>
                     <TableCell className="text-right hidden md:table-cell text-sm text-muted-foreground">
-                      {nativePrice != null ? formatUsd(nativePrice) : "—"}
+                      <div className="flex flex-col items-end gap-0.5">
+                        <span>{nativePrice != null ? formatUsd(nativePrice) : "—"}</span>
+                        <Change24h value={nativeChange24h} />
+                      </div>
                     </TableCell>
                     <TableCell className="text-right font-medium pr-4">
                       {totalXNT.toLocaleString(undefined, { maximumFractionDigits: 4 })}
@@ -205,7 +221,10 @@ const AggregatedTokenRow = ({ token }: { token: AggregatedToken }) => {
         </div>
       </TableCell>
       <TableCell className="text-right hidden md:table-cell text-sm text-muted-foreground">
-        {token.price != null ? formatUsd(token.price) : "—"}
+        <div className="flex flex-col items-end gap-0.5">
+          <span>{token.price != null ? formatUsd(token.price) : "—"}</span>
+          <Change24h value={token.change24h} />
+        </div>
       </TableCell>
       <TableCell className="text-right font-medium pr-4">
         {token.totalAmount.toLocaleString(undefined, { maximumFractionDigits: 6 })}

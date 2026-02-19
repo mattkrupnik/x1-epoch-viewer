@@ -59,7 +59,7 @@ export const WalletCard = ({
           </CardHeader>
           <AccordionContent>
             <CardContent className="pt-3">
-              <WalletTokens tokens={wallet.tokens} solBalance={wallet.solBalance} nativeLogo={wallet.nativeLogo} nativePrice={wallet.nativePrice} />
+              <WalletTokens tokens={wallet.tokens} solBalance={wallet.solBalance} nativeLogo={wallet.nativeLogo} nativePrice={wallet.nativePrice} nativeChange24h={wallet.nativeChange24h} />
             </CardContent>
           </AccordionContent>
         </Card>

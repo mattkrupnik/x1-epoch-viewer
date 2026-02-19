@@ -260,6 +260,24 @@ export const PortfolioDashboard = () => {
                 const total = tokenVal + xntVal;
                 return total > 0 && isFinite(total) ? total : undefined;
               })()}
+              totalChange24h={(() => {
+                let weightedSum = 0;
+                let totalWeight = 0;
+                for (const w of wallets) {
+                  if (w.nativeChange24h != null && w.nativePrice != null && w.solBalance > 0) {
+                    const xntVal = w.solBalance * w.nativePrice;
+                    weightedSum += xntVal * w.nativeChange24h;
+                    totalWeight += xntVal;
+                  }
+                  for (const t of w.tokens) {
+                    if (t.change24h != null && t.valueUsd != null && t.valueUsd > 0) {
+                      weightedSum += t.valueUsd * t.change24h;
+                      totalWeight += t.valueUsd;
+                    }
+                  }
+                }
+                return totalWeight > 0 ? weightedSum / totalWeight : undefined;
+              })()}
             />
             <AggregatedTokensTable wallets={wallets} />
           </>

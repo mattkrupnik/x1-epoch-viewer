@@ -23,6 +23,7 @@ export interface WalletBalance {
   accountType: WalletAccountType;
   nativeLogo?: string;
   nativePrice?: number;
+  nativeChange24h?: number;
 }
 
 // Program IDs for account type detection
@@ -116,6 +117,7 @@ export async function getWalletBalance(address: string): Promise<WalletBalance> 
         accountType,
         nativeLogo: nativeEntry?.imageUrl,
         nativePrice: nativeEntry?.price ?? undefined,
+        nativeChange24h: nativeEntry?.change_24h ?? undefined,
       };
     }
 

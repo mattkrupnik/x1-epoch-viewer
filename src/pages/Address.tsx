@@ -165,6 +165,7 @@ const Address = () => {
                   solBalance={wallet.solBalance}
                   nativeLogo={wallet.nativeLogo}
                   nativePrice={wallet.nativePrice}
+                  nativeChange24h={wallet.nativeChange24h}
                 />
               </CardContent>
             </Card>

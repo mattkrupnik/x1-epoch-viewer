@@ -15,6 +15,7 @@ interface WalletTokensProps {
   solBalance?: number;
   nativeLogo?: string;
   nativePrice?: number;
+  nativeChange24h?: number;
 }
 
 const formatUsd = (value: number) =>
@@ -27,7 +28,17 @@ const formatPrice = (price: number) =>
     ? `$${price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}`
     : `$${price.toPrecision(4)}`;
 
-export const WalletTokens = ({ tokens, solBalance, nativeLogo, nativePrice }: WalletTokensProps) => {
+const Change24h = ({ value }: { value?: number }) => {
+  if (value == null) return null;
+  const isPositive = value >= 0;
+  return (
+    <span className={`text-xs font-medium ${isPositive ? "text-green-500" : "text-red-500"}`}>
+      {isPositive ? "+" : ""}{value.toFixed(2)}%
+    </span>
+  );
+};
+
+export const WalletTokens = ({ tokens, solBalance, nativeLogo, nativePrice, nativeChange24h }: WalletTokensProps) => {
   const [nativeLogoError, setNativeLogoError] = useState(false);
 
   const hasXNT = solBalance !== undefined && solBalance > 0;
@@ -79,7 +90,10 @@ export const WalletTokens = ({ tokens, solBalance, nativeLogo, nativePrice }: Wa
                 </div>
               </TableCell>
               <TableCell className="text-right hidden md:table-cell text-sm text-muted-foreground">
-                {nativePrice != null ? formatPrice(nativePrice) : "—"}
+                <div className="flex flex-col items-end gap-0.5">
+                  <span>{nativePrice != null ? formatPrice(nativePrice) : "—"}</span>
+                  <Change24h value={nativeChange24h} />
+                </div>
               </TableCell>
               <TableCell className="text-right font-medium pr-4">
                 {solBalance!.toLocaleString(undefined, { maximumFractionDigits: 4 })}
@@ -136,7 +150,10 @@ const TokenRow = ({ token }: { token: TokenBalance }) => {
         </div>
       </TableCell>
       <TableCell className="text-right hidden md:table-cell text-sm text-muted-foreground">
-        {token.price != null ? formatPrice(token.price) : "—"}
+        <div className="flex flex-col items-end gap-0.5">
+          <span>{token.price != null ? formatPrice(token.price) : "—"}</span>
+          <Change24h value={token.change24h} />
+        </div>
       </TableCell>
       <TableCell className="text-right font-medium pr-4">
         {token.uiAmount.toLocaleString(undefined, { maximumFractionDigits: 6 })}
