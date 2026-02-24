@@ -20,10 +20,29 @@ import { HiddenTokensProvider, useHiddenTokens } from "@/lib/hidden-tokens";
 
 const STORAGE_KEY = "portfolioWallets";
 const ACCORDION_STATE_KEY = "portfolioAccordionState";
+const ADDRESS_LISTS_UPDATED_EVENT = "address-lists-updated";
 
 interface SavedWallet {
   address: string;
   accountType: WalletAccountType;
+}
+
+function readSavedWalletsFromStorage(): SavedWallet[] {
+  const saved = localStorage.getItem(STORAGE_KEY);
+  if (!saved) return [];
+
+  try {
+    const parsed = JSON.parse(saved);
+    if (!Array.isArray(parsed) || parsed.length === 0) return [];
+
+    if (typeof parsed[0] === "string") {
+      return parsed.map((addr: string) => ({ address: addr, accountType: "wallet" as WalletAccountType }));
+    }
+
+    return parsed.filter((item) => item && typeof item.address === "string");
+  } catch {
+    return [];
+  }
 }
 
 export const PortfolioDashboard = () => (
@@ -45,23 +64,8 @@ const PortfolioDashboardInner = () => {
 
   // Load saved addresses and accordion state from localStorage
   useEffect(() => {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    let loaded: SavedWallet[] = [];
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          if (typeof parsed[0] === "string") {
-            loaded = parsed.map((addr: string) => ({ address: addr, accountType: "wallet" as WalletAccountType }));
-          } else {
-            loaded = parsed;
-          }
-          setSavedWallets(loaded);
-        }
-      } catch (error) {
-        console.error("Failed to parse saved wallets:", error);
-      }
-    }
+    const loaded = readSavedWalletsFromStorage();
+    setSavedWallets(loaded);
 
     const savedAccordionState = localStorage.getItem(ACCORDION_STATE_KEY);
     if (savedAccordionState) {
@@ -77,6 +81,30 @@ const PortfolioDashboardInner = () => {
     }
 
     setInitialLoading(false);
+  }, []);
+
+  useEffect(() => {
+    const syncWalletsFromStorage = () => {
+      const loaded = readSavedWalletsFromStorage();
+      setSavedWallets(loaded);
+    };
+
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === STORAGE_KEY) {
+        syncWalletsFromStorage();
+      }
+    };
+
+    const onAddressListsUpdated = () => {
+      syncWalletsFromStorage();
+    };
+
+    window.addEventListener("storage", onStorage);
+    window.addEventListener(ADDRESS_LISTS_UPDATED_EVENT, onAddressListsUpdated);
+    return () => {
+      window.removeEventListener("storage", onStorage);
+      window.removeEventListener(ADDRESS_LISTS_UPDATED_EVENT, onAddressListsUpdated);
+    };
   }, []);
 
   useEffect(() => {

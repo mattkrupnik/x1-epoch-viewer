@@ -70,6 +70,20 @@ interface ValidatorSuggestion {
   iconUrl?: string;
 }
 
+const ADDRESS_LISTS_UPDATED_EVENT = "address-lists-updated";
+
+function readMonitoredAddressesFromStorage(): string[] {
+  const raw = localStorage.getItem("monitoredAddresses");
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
+  } catch {
+    return [];
+  }
+}
+
 export const ValidatorDashboard = () => {
   const [voteAddress, setVoteAddress] = useState("");
   const [validators, setValidators] = useState<ValidatorData[]>([]);
@@ -217,6 +231,56 @@ export const ValidatorDashboard = () => {
     }
     return data;
   };
+
+  useEffect(() => {
+    const syncValidatorsFromStorage = async () => {
+      const addresses = readMonitoredAddressesFromStorage();
+      setMonitoredAddresses(addresses);
+
+      if (addresses.length === 0) {
+        setValidators([]);
+        return;
+      }
+
+      const existingSet = new Set(validators.map((v) => v.voteAddress));
+      const missing = addresses.filter((address) => !existingSet.has(address));
+      if (missing.length === 0) return;
+
+      const loaded: ValidatorData[] = [];
+      for (const address of missing) {
+        try {
+          const data = await fetchValidatorFromAPI(address);
+          if (data) loaded.push(data);
+        } catch (error) {
+          console.error(`Failed to sync validator ${address}:`, error);
+        }
+      }
+
+      if (loaded.length > 0) {
+        setValidators((prev) => {
+          const byAddress = new Map(prev.map((item) => [item.voteAddress, item]));
+          loaded.forEach((item) => byAddress.set(item.voteAddress, item));
+          return addresses.map((address) => byAddress.get(address)).filter((item): item is ValidatorData => Boolean(item));
+        });
+      }
+    };
+
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === "monitoredAddresses") {
+        syncValidatorsFromStorage();
+      }
+    };
+    const onAddressListsUpdated = () => {
+      syncValidatorsFromStorage();
+    };
+
+    window.addEventListener("storage", onStorage);
+    window.addEventListener(ADDRESS_LISTS_UPDATED_EVENT, onAddressListsUpdated);
+    return () => {
+      window.removeEventListener("storage", onStorage);
+      window.removeEventListener(ADDRESS_LISTS_UPDATED_EVENT, onAddressListsUpdated);
+    };
+  }, [validators]);
 
   const handleSearch = async (addressToAdd?: string) => {
     const address = addressToAdd || voteAddress;
@@ -595,133 +659,131 @@ export const ValidatorDashboard = () => {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            {dashboardConfig.USE_AUTOCOMPLETE ? (
-              <div className="flex gap-3">
-                <div className="flex-1 relative">
-                  <Input
-                    ref={inputRef}
-                    placeholder="Enter validator vote address or name..."
-                    value={voteAddress}
-                    onChange={(e) => handleInputChange(e.target.value)}
-                    onKeyDown={handleKeyDown}
-                  />
-                  <Popover 
-                    open={autocompleteOpen && voteAddress.length >= 3} 
-                    onOpenChange={(open) => {
-                      // Only allow opening if we have 3+ characters and suggestions
-                      if (open && voteAddress.length >= 3 && suggestions.length > 0) {
-                        setAutocompleteOpen(true);
-                      } else if (!open) {
-                        setAutocompleteOpen(false);
-                      }
-                    }}
-                  >
-                    <PopoverTrigger asChild>
-                      <div className="absolute inset-0 pointer-events-none" />
-                    </PopoverTrigger>
-                    <PopoverContent
-                      className="w-[var(--radix-popover-trigger-width)] p-0 z-50"
-                      align="start"
-                      sideOffset={4}
-                      onOpenAutoFocus={(e) => {
-                        // Prevent stealing focus from input
-                        e.preventDefault();
-                      }}
-                    >
-                      <Command>
-                        <CommandList>
-                          {loadingSuggestions ? (
-                            <div className="py-6 text-center text-sm">Loading...</div>
-                          ) : (
-                            <CommandGroup>
-                              {suggestions.map((suggestion, index) => (
-                                <CommandItem
-                                  key={suggestion.votePubkey}
-                                  data-suggestion-index={index}
-                                  onSelect={() => selectSuggestion(suggestion)}
-                                  className={`flex items-center gap-3 py-3 cursor-pointer ${
-                                      index === selectedSuggestionIndex ? 'bg-border' : ''
-                                  }`}
-                                >
-                                  <Avatar className="h-8 w-8">
-                                    <AvatarImage src={suggestion.iconUrl} alt={suggestion.name} />
-                                    <AvatarFallback>
-                                      <User className="h-4 w-4" />
-                                    </AvatarFallback>
-                                  </Avatar>
-                                  <div className="flex-1 min-w-0">
-                                    <div className="font-medium truncate">{suggestion.name}</div>
-                                    <div className="text-xs text-muted-foreground truncate">
-                                      {suggestion.votePubkey.slice(0, 12)}...{suggestion.votePubkey.slice(-4)}
-                                    </div>
-                                  </div>
-                                </CommandItem>
-                              ))}
-                            </CommandGroup>
-                          )}
-                        </CommandList>
-                      </Command>
-                    </PopoverContent>
-                  </Popover>
-                </div>
-                <Button 
-                  onClick={() => handleSearch()} 
-                  disabled={loading}
-                  className="gap-2"
-                >
-                  <Plus className="h-4 w-4" />
-                  {loading ? "Adding..." : "Add"}
-                </Button>
-              </div>
-            ) : (
-              <div className="flex gap-3">
-                <Input
-                  placeholder="Enter validator vote address..."
-                  value={voteAddress}
-                  onChange={(e) => setVoteAddress(e.target.value)}
-                  className="flex-1"
-                  onKeyDown={(e) => e.key === "Enter" && handleSearch()}
-                />
-                <Button 
-                  onClick={() => handleSearch()} 
-                  disabled={loading}
-                  className="gap-2"
-                >
-                  <Plus className="h-4 w-4" />
-                  {loading ? "Adding..." : "Add"}
-                </Button>
-              </div>
-            )}
-            
-            {validators.length > 0 && (
-              <div className="flex flex-wrap gap-2">
-                {validators.map((validator) => (
-                  <Badge
-                    key={validator.voteAddress}
-                    variant="secondary"
-                    className="gap-2 text-xs pr-1 pl-1"
-                  >
-                    <span className="max-w-[200px] truncate flex gap-2">
-                      <Avatar className="h-4 w-4 hidden sm:flex">
-                        <AvatarImage src={validator.avatar} alt={validator.name || validator.voteAddress} />
-                          <AvatarFallback>
-                            <User className="h-4 w-4" />
-                          </AvatarFallback>
-                      </Avatar>
-                      {validator.name}
-                    </span>
+                {dashboardConfig.USE_AUTOCOMPLETE ? (
+                  <div className="flex gap-3">
+                    <div className="flex-1 relative">
+                      <Input
+                        ref={inputRef}
+                        placeholder="Enter validator vote address or name..."
+                        value={voteAddress}
+                        onChange={(e) => handleInputChange(e.target.value)}
+                        onKeyDown={handleKeyDown}
+                      />
+                      <Popover
+                        open={autocompleteOpen && voteAddress.length >= 3}
+                        onOpenChange={(open) => {
+                          if (open && voteAddress.length >= 3 && suggestions.length > 0) {
+                            setAutocompleteOpen(true);
+                          } else if (!open) {
+                            setAutocompleteOpen(false);
+                          }
+                        }}
+                      >
+                        <PopoverTrigger asChild>
+                          <div className="absolute inset-0 pointer-events-none" />
+                        </PopoverTrigger>
+                        <PopoverContent
+                          className="w-[var(--radix-popover-trigger-width)] p-0 z-50"
+                          align="start"
+                          sideOffset={4}
+                          onOpenAutoFocus={(e) => {
+                            e.preventDefault();
+                          }}
+                        >
+                          <Command>
+                            <CommandList>
+                              {loadingSuggestions ? (
+                                <div className="py-6 text-center text-sm">Loading...</div>
+                              ) : (
+                                <CommandGroup>
+                                  {suggestions.map((suggestion, index) => (
+                                    <CommandItem
+                                      key={suggestion.votePubkey}
+                                      data-suggestion-index={index}
+                                      onSelect={() => selectSuggestion(suggestion)}
+                                      className={`flex items-center gap-3 py-3 cursor-pointer ${
+                                          index === selectedSuggestionIndex ? 'bg-border' : ''
+                                      }`}
+                                    >
+                                      <Avatar className="h-8 w-8">
+                                        <AvatarImage src={suggestion.iconUrl} alt={suggestion.name} />
+                                        <AvatarFallback>
+                                          <User className="h-4 w-4" />
+                                        </AvatarFallback>
+                                      </Avatar>
+                                      <div className="flex-1 min-w-0">
+                                        <div className="font-medium truncate">{suggestion.name}</div>
+                                        <div className="text-xs text-muted-foreground truncate">
+                                          {suggestion.votePubkey.slice(0, 12)}...{suggestion.votePubkey.slice(-4)}
+                                        </div>
+                                      </div>
+                                    </CommandItem>
+                                  ))}
+                                </CommandGroup>
+                              )}
+                            </CommandList>
+                          </Command>
+                        </PopoverContent>
+                      </Popover>
+                    </div>
                     <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-4 w-4 p-0 hover:bg-accent"
-                      onClick={() => removeValidator(validator.voteAddress)}
+                      onClick={() => handleSearch()}
+                      disabled={loading}
+                      className="gap-2"
                     >
-                      <X className="h-3 w-3" />
+                      <Plus className="h-4 w-4" />
+                      {loading ? "Adding..." : "Add"}
                     </Button>
-                  </Badge>
-                ))}
-              </div>
-            )}
+                  </div>
+                ) : (
+                  <div className="flex gap-3">
+                    <Input
+                      placeholder="Enter validator vote address..."
+                      value={voteAddress}
+                      onChange={(e) => setVoteAddress(e.target.value)}
+                      className="flex-1"
+                      onKeyDown={(e) => e.key === "Enter" && handleSearch()}
+                    />
+                    <Button
+                      onClick={() => handleSearch()}
+                      disabled={loading}
+                      className="gap-2"
+                    >
+                      <Plus className="h-4 w-4" />
+                      {loading ? "Adding..." : "Add"}
+                    </Button>
+                  </div>
+                )}
+
+                {validators.length > 0 && (
+                  <div className="flex flex-wrap gap-2">
+                    {validators.map((validator) => (
+                      <Badge
+                        key={validator.voteAddress}
+                        variant="secondary"
+                        className="gap-2 text-xs pr-1 pl-1"
+                      >
+                        <span className="max-w-[200px] truncate flex gap-2">
+                          <Avatar className="h-4 w-4 hidden sm:flex">
+                            <AvatarImage src={validator.avatar} alt={validator.name || validator.voteAddress} />
+                              <AvatarFallback>
+                                <User className="h-4 w-4" />
+                              </AvatarFallback>
+                          </Avatar>
+                          {validator.name}
+                        </span>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-4 w-4 p-0 hover:bg-accent"
+                          onClick={() => removeValidator(validator.voteAddress)}
+                        >
+                          <X className="h-3 w-3" />
+                        </Button>
+                      </Badge>
+                    ))}
+                  </div>
+                )}
           </CardContent>
         </Card>
 

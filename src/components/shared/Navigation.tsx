@@ -1,6 +1,7 @@
 import { Link, useLocation } from "react-router-dom";
 import { Coins, Wallet } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { AddressKeysDialog } from "@/components/shared/AddressKeysDialog";
 
 interface NavigationProps {
   showNavigation?: boolean;
@@ -47,6 +48,7 @@ export const Navigation = (
           </Link>
         );
       })}
+      <AddressKeysDialog />
     </nav>
   );
 };
