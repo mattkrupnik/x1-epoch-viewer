@@ -16,6 +16,17 @@ export async function initDatabase(): Promise<void> {
     await pool.query(
       `ALTER TABLE validators ADD COLUMN IF NOT EXISTS is_tracked BOOLEAN NOT NULL DEFAULT true`
     );
+    await pool.query(
+      `CREATE TABLE IF NOT EXISTS address_keys (
+        key VARCHAR(16) PRIMARY KEY,
+        validators TEXT[] NOT NULL DEFAULT '{}',
+        wallets TEXT[] NOT NULL DEFAULT '{}',
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        last_used_at TIMESTAMP,
+        use_count INTEGER NOT NULL DEFAULT 0
+      )`
+    );
 
     console.log('Database schema initialized successfully');
   } catch (error) {

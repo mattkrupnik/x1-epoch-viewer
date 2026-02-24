@@ -1,5 +1,18 @@
 const API_URL = import.meta.env.VITE_API_URL || '';
 
+export interface AddressKeyPayload {
+  validators: string[];
+  wallets: string[];
+}
+
+export interface AddressKeyResponse {
+  key: string;
+  validators: string[];
+  wallets: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
 export const api = {
   async getValidator(voteAddress: string) {
     const response = await fetch(`${API_URL}/api/validators/${voteAddress}`);
@@ -60,6 +73,41 @@ export const api = {
   async getEpochTimestamps(): Promise<Record<number, string>> {
     const response = await fetch(`${API_URL}/api/epoch-timestamps`);
     if (!response.ok) throw new Error(`API error: ${response.status}`);
+    return response.json();
+  },
+
+  async createAddressKey(payload: AddressKeyPayload): Promise<{ key: string; validatorsCount: number; walletsCount: number; createdAt: string }> {
+    const response = await fetch(`${API_URL}/api/address-keys`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Unknown error' }));
+      throw new Error(error.error || `API error: ${response.status}`);
+    }
+    return response.json();
+  },
+
+  async getAddressKey(key: string): Promise<AddressKeyResponse> {
+    const response = await fetch(`${API_URL}/api/address-keys/${encodeURIComponent(key)}`);
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Unknown error' }));
+      throw new Error(error.error || `API error: ${response.status}`);
+    }
+    return response.json();
+  },
+
+  async updateAddressKey(key: string, payload: AddressKeyPayload): Promise<{ key: string; validatorsCount: number; walletsCount: number; updatedAt: string }> {
+    const response = await fetch(`${API_URL}/api/address-keys/${encodeURIComponent(key)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Unknown error' }));
+      throw new Error(error.error || `API error: ${response.status}`);
+    }
     return response.json();
   },
 };

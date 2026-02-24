@@ -5,6 +5,7 @@ import express from 'express';
 import cors from 'cors';
 import { initDatabase } from './db/init.js';
 import cacheRoutes from './routes/cache.js';
+import addressKeysRoutes from './routes/address-keys.js';
 import validatorsRoutes from './routes/validators.js';
 import epochTimestampsRoutes from './routes/epoch-timestamps.js';
 import { startEpochMonitor } from './workers/epoch-monitor.js';
@@ -23,6 +24,7 @@ app.use(express.json({ limit: '10mb' }));
 
 // Routes
 app.use('/api/cache', cacheRoutes);
+app.use('/api/address-keys', addressKeysRoutes);
 app.use('/api/validators', validatorsRoutes);
 app.use('/api/epoch-timestamps', epochTimestampsRoutes);
 
