@@ -18,6 +18,7 @@ import {
 import type { ValidatorData, EpochReward } from '../lib/types.js';
 
 const router = Router();
+const RECENT_EPOCHS_TO_RECALCULATE = 10;
 
 // Sync missing epochs for a validator when page is visited
 async function syncMissingEpochs(v: any, currentRpcEpoch: number): Promise<void> {
@@ -421,21 +422,27 @@ router.post('/:voteAddress/resync', async (req, res) => {
     // Find missing epochs (all from beginning)
     const allEpochs = Array.from({ length: currentEpoch }, (_, i) => currentEpoch - 1 - i).filter(e => e >= 0);
     const missingEpochs = allEpochs.filter(e => !existingSet.has(e));
+    const latestRewardEpoch = currentEpoch - 1;
+    const recentEpochs = Array.from(
+      { length: RECENT_EPOCHS_TO_RECALCULATE },
+      (_, i) => latestRewardEpoch - i
+    ).filter(e => e >= 0);
+    const epochsToSync = Array.from(new Set([...recentEpochs, ...missingEpochs]));
 
-    if (missingEpochs.length === 0) {
+    if (epochsToSync.length === 0) {
       const response = await buildValidatorResponse(voteAddress);
       return res.json(response);
     }
 
-    console.log(`[resync] ${voteAddress}: found ${missingEpochs.length} missing epochs, fetching...`);
+    console.log(`[resync] ${voteAddress}: syncing ${epochsToSync.length} epoch(s), including ${missingEpochs.length} missing epoch(s) and ${recentEpochs.length} recent epoch(s)`);
 
     const selfStakeAddresses = v.self_stake_addresses || [];
     const hasSelfStake = selfStakeAddresses.length > 0;
 
     // Build RPC requests
-    const voteRewardRequests = buildInflationRewardRequests([voteAddress], missingEpochs);
+    const voteRewardRequests = buildInflationRewardRequests([voteAddress], epochsToSync);
     const selfStakeRequests = hasSelfStake
-      ? buildInflationRewardRequests(selfStakeAddresses, missingEpochs)
+      ? buildInflationRewardRequests(selfStakeAddresses, epochsToSync)
       : [];
 
     // Get timestamps
@@ -446,7 +453,7 @@ router.post('/:voteAddress/resync', async (req, res) => {
     const existingTimestamps = await getAllTimestamps();
     const epochSlotMap = await fetchEpochSlotMap();
 
-    const epochsNeedingTimestamp = missingEpochs.filter(
+    const epochsNeedingTimestamp = epochsToSync.filter(
       epoch => !existingTimestamps.has(epoch) && epochSlotMap.has(epoch)
     );
     const timeRequests = buildBlockTimeRequests(epochsNeedingTimestamp, epochSlotMap);
@@ -454,9 +461,9 @@ router.post('/:voteAddress/resync', async (req, res) => {
     const allRequests = [...voteRewardRequests, ...selfStakeRequests, ...timeRequests];
     const batchResults = await x1Client.batchCall(allRequests);
 
-    const voteRewardResults = batchResults.slice(0, missingEpochs.length);
-    const selfStakeResults = batchResults.slice(missingEpochs.length, missingEpochs.length + selfStakeRequests.length);
-    const timeResults = batchResults.slice(missingEpochs.length + selfStakeRequests.length);
+    const voteRewardResults = batchResults.slice(0, epochsToSync.length);
+    const selfStakeResults = batchResults.slice(epochsToSync.length, epochsToSync.length + selfStakeRequests.length);
+    const timeResults = batchResults.slice(epochsToSync.length + selfStakeRequests.length);
 
     // Process timestamps
     const { epochTimeMap, newTimestamps } = processTimestampResults(
@@ -465,7 +472,7 @@ router.post('/:voteAddress/resync', async (req, res) => {
 
     // Process rewards
     const rewardRows = processEpochRewards(
-      voteRewardResults, selfStakeResults, missingEpochs,
+      voteRewardResults, selfStakeResults, epochsToSync,
       epochTimeMap, stakeHistoryMap, hasSelfStake
     );
 
@@ -474,9 +481,9 @@ router.post('/:voteAddress/resync', async (req, res) => {
     try {
       await client.query('BEGIN');
       await saveTimestampsBatch(client, newTimestamps);
-      await saveEpochRewardsBatch(client, voteAddress, rewardRows);
+      await saveEpochRewardsBatch(client, voteAddress, rewardRows, true);
       await client.query('COMMIT');
-      console.log(`[resync] ${voteAddress}: filled ${rewardRows.length} missing epochs`);
+      console.log(`[resync] ${voteAddress}: upserted ${rewardRows.length} epoch rewards`);
     } catch (error) {
       await client.query('ROLLBACK');
       throw error;
