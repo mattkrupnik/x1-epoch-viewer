@@ -57,6 +57,17 @@ async function syncValidatorsList(): Promise<void> {
         );
       }
 
+      await client.query(
+        `UPDATE validators v
+         SET name = COALESCE(vl.name, v.name),
+             avatar = COALESCE(vl.icon_url, v.avatar),
+             node_pubkey = COALESCE(vl.node_pubkey, v.node_pubkey),
+             updated_at = NOW()
+         FROM validators_list vl
+         WHERE v.vote_address = vl.vote_pubkey
+           AND v.is_tracked = true`
+      );
+
       const refreshIntervalSec = REFRESH_INTERVAL_MS / 1000;
       await client.query(
         `INSERT INTO cache_metadata (cache_key, last_updated, expires_at)
