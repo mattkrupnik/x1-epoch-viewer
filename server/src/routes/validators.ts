@@ -111,7 +111,7 @@ async function syncMissingEpochs(v: any, currentRpcEpoch: number): Promise<void>
   }
 }
 
-// Helper: Refresh current validator fields from RPC (status, stake, commission, self_stake_amount)
+// Helper: Refresh current validator fields from RPC/Xen API.
 async function refreshValidatorFields(voteAddress: string): Promise<void> {
   const freshVoteAccounts = await x1Client.getVoteAccounts();
   const freshActive = freshVoteAccounts.current?.find((a: any) => a.votePubkey === voteAddress);
@@ -123,18 +123,28 @@ async function refreshValidatorFields(voteAddress: string): Promise<void> {
   const newStatus = freshActive ? 'active' : 'delinquent';
   const newActivatedStake = freshAccount.activatedStake ? freshAccount.activatedStake / 1e9 : 0;
   const newCommission = freshAccount.commission;
+  const newNodePubkey = freshAccount.nodePubkey || null;
+  const { name: newName, avatar: newAvatar } = await fetchValidatorMetadata(voteAddress);
 
   const storedResult = await pool.query(
-    'SELECT self_stake_addresses, self_stake_amount FROM validators WHERE vote_address = $1',
+    'SELECT self_stake_addresses, self_stake_amount, node_pubkey FROM validators WHERE vote_address = $1',
     [voteAddress]
   );
   const stored = storedResult.rows[0];
-  const storedAddresses: string[] = stored?.self_stake_addresses || [];
-  let newSelfStakeAmount = stored?.self_stake_amount ?? 0;
+  let selfStakeAddresses: string[] = stored?.self_stake_addresses || [];
+  let newSelfStakeAmount = 0;
 
-  if (storedAddresses.length > 0) {
+  if (newNodePubkey || stored?.node_pubkey) {
     try {
-      const accountsInfo = await x1Client.getMultipleAccounts(storedAddresses);
+      selfStakeAddresses = await x1Client.getStakeAccountsForVote(voteAddress, newNodePubkey || stored.node_pubkey);
+    } catch (err) {
+      console.error(`[refreshValidatorFields] ${voteAddress}: getStakeAccountsForVote failed:`, (err as Error).message);
+    }
+  }
+
+  if (selfStakeAddresses.length > 0) {
+    try {
+      const accountsInfo = await x1Client.getMultipleAccounts(selfStakeAddresses);
       newSelfStakeAmount = accountsInfo.value
         .filter((acc: any) => acc !== null)
         .reduce((sum: number, acc: any) => sum + (acc.lamports || 0), 0) / 1e9;
@@ -145,11 +155,29 @@ async function refreshValidatorFields(voteAddress: string): Promise<void> {
 
   await pool.query(
     `UPDATE validators
-     SET status = $1, activated_stake = $2, commission = $3, self_stake_amount = $4, updated_at = NOW()
-     WHERE vote_address = $5`,
-    [newStatus, newActivatedStake, newCommission, newSelfStakeAmount, voteAddress]
+     SET name = COALESCE($1, name),
+         avatar = COALESCE($2, avatar),
+         status = $3,
+         activated_stake = $4,
+         commission = $5,
+         self_stake_addresses = $6,
+         self_stake_amount = $7,
+         node_pubkey = COALESCE($8, node_pubkey),
+         updated_at = NOW()
+     WHERE vote_address = $9`,
+    [
+      newName || null,
+      newAvatar || null,
+      newStatus,
+      newActivatedStake,
+      newCommission,
+      selfStakeAddresses,
+      newSelfStakeAmount,
+      newNodePubkey,
+      voteAddress,
+    ]
   );
-  console.log(`[refreshValidatorFields] ${voteAddress}: stake=${newActivatedStake}, selfStake=${newSelfStakeAmount}, status=${newStatus}`);
+  console.log(`[refreshValidatorFields] ${voteAddress}: stake=${newActivatedStake}, selfStake=${newSelfStakeAmount}, selfStakeAccounts=${selfStakeAddresses.length}, status=${newStatus}`);
 }
 
 // GET /api/validators/search?q= - Search validators list
@@ -194,7 +222,7 @@ router.get('/:voteAddress', async (req, res) => {
       return res.status(404).json({ error: 'Validator not found' });
     }
 
-    const v = validatorResult.rows[0];
+    let v = validatorResult.rows[0];
 
     // Sync-on-visit: check if there are newer epochs available
     let rpcEpoch: number | null = null;
@@ -208,6 +236,12 @@ router.get('/:voteAddress', async (req, res) => {
       );
 
       if (latestCheck.rows.length === 0 || v.current_epoch !== epochInfo.epoch) {
+        await refreshValidatorFields(voteAddress);
+        const refreshed = await pool.query(
+          'SELECT * FROM validators WHERE vote_address = $1 AND is_tracked = true',
+          [voteAddress]
+        );
+        v = refreshed.rows[0] || v;
         await syncMissingEpochs(v, epochInfo.epoch);
       }
     } catch (syncError) {
@@ -354,14 +388,18 @@ router.post('/:voteAddress/resync', async (req, res) => {
       return res.status(404).json({ error: 'Validator not found' });
     }
 
-    const v = validatorResult.rows[0];
-
     // Refresh current validator fields from RPC (status, stake, commission, self_stake_amount)
     try {
       await refreshValidatorFields(voteAddress);
     } catch (refreshErr) {
       console.error(`[resync] ${voteAddress}: failed to refresh validator fields:`, (refreshErr as Error).message);
     }
+
+    const refreshedValidatorResult = await pool.query(
+      'SELECT * FROM validators WHERE vote_address = $1',
+      [voteAddress]
+    );
+    const v = refreshedValidatorResult.rows[0];
 
     // Get existing epochs from DB
     const existingEpochs = await pool.query(
