@@ -1,6 +1,6 @@
 import pool from '../db/connection.js';
 import { x1Client } from '../lib/x1-rpc.js';
-import { fetchEpochSlotMap, fetchStakeHistoryForEpoch } from '../lib/xen-api.js';
+import { fetchEpochSlotMap, fetchStakeHistoryForEpoch, fetchValidatorMetadata } from '../lib/xen-api.js';
 import { formatEpochTimestamp, calculateSelfStakeReward } from '../lib/epoch-helpers.js';
 
 const FALLBACK_INTERVAL_MS = 5 * 60_000; // 5 min fallback if calculation fails
@@ -52,6 +52,18 @@ async function updateValidatorsForNewEpoch(newEpoch: number, currentEpoch: numbe
     return;
   }
   const allAccounts = [...voteAccounts.current, ...voteAccounts.delinquent];
+
+  for (const v of validators) {
+    const account = allAccounts.find((acc: any) => acc.votePubkey === v.vote_address);
+    if (!account?.nodePubkey) continue;
+
+    try {
+      v.self_stake_addresses = await x1Client.getStakeAccountsForVote(v.vote_address, account.nodePubkey);
+      v.node_pubkey = account.nodePubkey;
+    } catch (error) {
+      console.error(`[epoch-monitor] Failed to refresh self_stake_addresses for ${v.vote_address}:`, (error as Error).message);
+    }
+  }
 
   // Fetch epoch metadata for timestamp
   let epochEndSlot: number | undefined;
@@ -188,6 +200,11 @@ async function updateValidatorsForNewEpoch(newEpoch: number, currentEpoch: numbe
     }
   }
 
+  const validatorMetadataMap = new Map<string, { name?: string; avatar?: string }>();
+  for (const v of validators) {
+    validatorMetadataMap.set(v.vote_address, await fetchValidatorMetadata(v.vote_address));
+  }
+
   // Process results and save to DB
   const client = await pool.connect();
   try {
@@ -206,29 +223,59 @@ async function updateValidatorsForNewEpoch(newEpoch: number, currentEpoch: numbe
         const newStatus = voteAccounts.current.some((a: any) => a.votePubkey === v.vote_address)
           ? 'active'
           : 'delinquent';
+        const metadata = validatorMetadataMap.get(v.vote_address) || {};
 
         if (selfStakeAmountMap.has(v.vote_address)) {
           await client.query(
             `UPDATE validators SET
-              status = $1,
-              activated_stake = $2,
-              commission = $3,
-              current_epoch = $4,
-              self_stake_amount = $5,
+              name = COALESCE($1, name),
+              avatar = COALESCE($2, avatar),
+              status = $3,
+              activated_stake = $4,
+              commission = $5,
+              current_epoch = $6,
+              self_stake_amount = $7,
+              self_stake_addresses = $8,
+              node_pubkey = COALESCE($9, node_pubkey),
               updated_at = NOW()
-             WHERE vote_address = $6`,
-            [newStatus, newActivatedStake, account.commission, currentEpoch, selfStakeAmountMap.get(v.vote_address)!, v.vote_address]
+             WHERE vote_address = $10`,
+            [
+              metadata.name || null,
+              metadata.avatar || null,
+              newStatus,
+              newActivatedStake,
+              account.commission,
+              currentEpoch,
+              selfStakeAmountMap.get(v.vote_address)!,
+              v.self_stake_addresses || [],
+              v.node_pubkey || null,
+              v.vote_address,
+            ]
           );
         } else {
           await client.query(
             `UPDATE validators SET
-              status = $1,
-              activated_stake = $2,
-              commission = $3,
-              current_epoch = $4,
+              name = COALESCE($1, name),
+              avatar = COALESCE($2, avatar),
+              status = $3,
+              activated_stake = $4,
+              commission = $5,
+              current_epoch = $6,
+              self_stake_addresses = $7,
+              node_pubkey = COALESCE($8, node_pubkey),
               updated_at = NOW()
-             WHERE vote_address = $5`,
-            [newStatus, newActivatedStake, account.commission, currentEpoch, v.vote_address]
+             WHERE vote_address = $9`,
+            [
+              metadata.name || null,
+              metadata.avatar || null,
+              newStatus,
+              newActivatedStake,
+              account.commission,
+              currentEpoch,
+              v.self_stake_addresses || [],
+              v.node_pubkey || null,
+              v.vote_address,
+            ]
           );
         }
       }
